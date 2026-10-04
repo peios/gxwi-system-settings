@@ -156,9 +156,9 @@ impl Settings {
     fn nav(&self) -> Vec<Nav> {
         let section = |view: View, title, now: String, glyph, tile| Nav::Section(Section { id: view.id(), title, now, glyph, tile });
         vec![
-            section(View::Time, "Time & date", time::now(&self.time), Glyph::Clock, Tile::Blue),
-            section(View::Language, "Language & keyboard", language::now(&self.language, &self.installed), Glyph::Globe, Tile::Violet),
-            section(View::Startup, "Startup & shutdown", startup::now(&self.startup), Glyph::Power, Tile::Orange),
+            section(View::Time, "Time & Date", time::now(&self.time), Glyph::Clock, Tile::Blue),
+            section(View::Language, "Language & Keyboard", language::now(&self.language, &self.installed), Glyph::Globe, Tile::Violet),
+            section(View::Startup, "Startup & Shutdown", startup::now(&self.startup), Glyph::Power, Tile::Orange),
             section(View::About, "About", about::now(&self.about), Glyph::Info, Tile::Slate),
         ]
     }

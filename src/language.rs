@@ -188,32 +188,32 @@ pub fn render(language: &Language, installed: &Installed, fields: &Fields) -> St
     let mixed = language.formats.as_deref() == Some("");
     let mut foot = String::new();
     if mixed {
-        foot.push_str(&settings::note("The formats are set one by one, to different languages. Choosing here sets them all."));
+        foot.push_str(&settings::note("Formats are currently set individually, to different languages. Choosing one here sets them all."));
     }
     foot.push_str(&match &language.may_locale {
         Err(why) => settings::locked(why),
         Ok(()) => settings::hint(
-            "Another language is added by installing its language pack, such as org.gnu.glibc-langpack-de for German.",
+            "To add a language, install its language pack, such as org.gnu.glibc-langpack-de for German.",
         ),
     });
     let rows = format!(
         "{}{}",
         settings::row(
             "Language",
-            "For everyone who hasn't chosen their own in My Settings. Sessions that start after this use it.",
+            "The System Default for everyone who hasn't chosen their own. Applies to new sessions.",
             &settings::select("lang", "Language", &locales(None, fields.get("lang")), may_locale),
         ),
         settings::row(
             "Formats",
-            "How dates, numbers, money, measures and paper sizes are written.",
-            &settings::select("formats", "Formats", &locales(Some("The same as the language"), fields.get("formats")), may_locale),
+            "How dates, numbers, currency, measurements and paper sizes are written.",
+            &settings::select("formats", "Formats", &locales(Some("Match Language"), fields.get("formats")), may_locale),
         ),
     );
-    let language_group = settings::group("Language and formats", &rows, &foot);
+    let language_group = settings::group("Language & Formats", &rows, &foot);
 
     let may_keymap = language.may_keymap.is_ok();
     let chosen = fields.get("keymap");
-    let mut maps = format!(r#"<option value=""{}>US — built in</option>"#, if chosen.is_empty() { " selected" } else { "" });
+    let mut maps = format!(r#"<option value=""{}>US (System Default)</option>"#, if chosen.is_empty() { " selected" } else { "" });
     for (family, names) in &installed.keymaps {
         maps.push_str(&format!("<optgroup label=\"{}\">", escape(&family_name(family))));
         for name in names {
@@ -237,17 +237,17 @@ pub fn render(language: &Language, installed: &Installed, fields: &Fields) -> St
         foot.push_str(&settings::locked(why));
     }
     let keyboard_group = settings::group(
-        "Keyboard at the console",
+        "Console Keyboard",
         &settings::row(
             "Layout",
-            "The keyboard plugged into this machine, on its text consoles. The desktop uses the browser's, and SSH the computer it's typed on.",
+            "For keyboards attached to this machine, at its text consoles. The desktop and SSH use the layout of the device you type on.",
             &layout,
         ),
         &foot,
     );
     format!(
         "{}{language_group}{keyboard_group}",
-        settings::head(Glyph::Globe, Tile::Violet, "Language & keyboard", "What everyone's sessions start in, and the console's keyboard.")
+        settings::head(Glyph::Globe, Tile::Violet, "Language & Keyboard", "The default language for all users, and the console keyboard.")
     )
 }
 
@@ -283,7 +283,7 @@ pub fn save_language(fields: &Fields) -> Result<String, String> {
         values.push((category, (!formats.is_empty()).then(|| Data::Sz(formats.to_string()))));
     }
     reg::set(LOCALE_KEY, "the machine's language", &values)?;
-    Ok("Saved. Sessions that start from now on use it.".into())
+    Ok("Saved. Applies to new sessions.".into())
 }
 
 /// Saves the layout, then has the console-keymap service load it.
@@ -297,16 +297,16 @@ pub fn save_keymap(language: &Language, installed: &Installed, fields: &Fields) 
     let name = if chosen.is_empty() { "US" } else { chosen };
     match &language.loader {
         Ok(()) => {}
-        Err(NotNow::NextBoot(_)) => return Ok(format!("Saved: the console's layout is {name} from the next boot.")),
+        Err(NotNow::NextBoot(_)) => return Ok(format!("Console layout set to {name}. Applies at the next boot.")),
         Err(NotNow::Never(_)) => {
-            return Ok(format!("Saved, as {name}. Nothing on this machine loads it: it has no console-keymap service."));
+            return Ok(format!("Console layout set to {name}, but this machine has no console-keymap service to load it."));
         }
     }
     let mut client = ControlClient::connect_default().map_err(|e| format!("Saved, but peinit can't be reached to load it: {e}."))?;
     client
         .command(Command::Restart, KEYMAP_SERVICE)
         .map_err(|e| format!("Saved, but it couldn't be loaded now: {e}. It applies at the next boot."))?;
-    Ok(format!("The console's layout is {name}."))
+    Ok(format!("Console layout set to {name}."))
 }
 
 /// Applies a field that applies as it changes.

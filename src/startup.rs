@@ -28,11 +28,11 @@ const REBUILDER_KEY: &str = "Machine\\System\\Services\\mkuki-watch";
 /// The boot timeouts: value, what it is, its default, its unit, when a
 /// change applies.
 pub const TIMEOUTS: [(&str, &str, u32, &str, &str); 5] = [
-    ("ShutdownTimeout", "Waiting for services to stop at shutdown", 90, "seconds", "Applies the next time peinit re-reads its configuration."),
-    ("PostKillTimeout", "Waiting after ending what didn't stop", 5, "seconds", "Applies at the next boot."),
-    ("BootSuccessGrace", "Running well before a boot counts as good", 30, "seconds", "Applies at the next boot."),
-    ("SettleTimeout", "Waiting for devices to settle at boot", 5, "seconds", "Applies at the next boot."),
-    ("MaxParallelStarts", "Services started at once", 10, "at most", "Applies at the next boot."),
+    ("ShutdownTimeout", "Shutdown Timeout", 90, "seconds", "How long services may take to stop. Applies when peinit next reloads its configuration."),
+    ("PostKillTimeout", "Post-Kill Timeout", 5, "seconds", "How long to wait after forcing a service to stop. Applies at the next boot."),
+    ("BootSuccessGrace", "Boot Confirmation Delay", 30, "seconds", "How long essential services must run before a boot counts as successful. Applies at the next boot."),
+    ("SettleTimeout", "Device Settle Timeout", 5, "seconds", "How long to wait for devices at boot. Applies at the next boot."),
+    ("MaxParallelStarts", "Parallel Service Starts", 10, "services", "How many services may start at once. Applies at the next boot."),
 ];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -176,9 +176,9 @@ pub fn save_cmdline(startup: &Startup, fields: &Fields) -> Result<String, String
 /// What the side says of this section.
 pub fn now(startup: &Startup) -> String {
     match &startup.boot {
-        Ok(boot) if boot.mode == "safe" => "Started in safe mode".into(),
-        Ok(boot) => format!("Started normally · {}", crate::words::boot_short(boot).0.to_lowercase()),
-        Err(_) => "How it started is unknown".into(),
+        Ok(boot) if boot.mode == "safe" => "Safe mode".into(),
+        Ok(boot) => format!("Normal boot · {}", crate::words::boot_short(boot).0.to_lowercase()),
+        Err(_) => "Boot status unavailable".into(),
     }
 }
 
@@ -189,13 +189,13 @@ pub fn timeouts_changed(startup: &Startup, fields: &Fields) -> bool {
 
 pub fn render(startup: &Startup, fields: &Fields) -> String {
     let hero = match &startup.boot {
-        Err(why) => settings::hero(&settings::hero_title(Glyph::Power, Tile::Orange, "This boot", why), ""),
+        Err(why) => settings::hero(&settings::hero_title(Glyph::Power, Tile::Orange, "Current Boot", why), ""),
         Ok(boot) => {
             let (said, tone) = crate::words::boot_short(boot);
             let title = match boot.mode.as_str() {
-                "safe" => "Started in safe mode",
-                "recovery" => "In recovery",
-                _ => "Started normally",
+                "safe" => "Safe Mode",
+                "recovery" => "Recovery",
+                _ => "Normal Boot",
             };
             // Why it is in that mode, when it isn't the usual.
             let about = if boot.reason == "normal" {
@@ -209,7 +209,7 @@ pub fn render(startup: &Startup, fields: &Fields) -> String {
 
     // Signing in at the console.
     let login_group = match &startup.autologon {
-        Err(why) => settings::group("Signing in at the console", &settings::row("Sign in without asking", why, ""), ""),
+        Err(why) => settings::group("Console Sign-In", &settings::row("Automatic Sign-In", why, ""), ""),
         Ok(current) => {
             let mut names = startup.accounts.clone();
             if let Some(current) = current
@@ -217,14 +217,14 @@ pub fn render(startup: &Startup, fields: &Fields) -> String {
             {
                 names.push(current.clone());
             }
-            let mut options = vec![(String::new(), "Nobody: always ask".to_string())];
+            let mut options = vec![(String::new(), "Off".to_string())];
             options.extend(names.iter().map(|n| (n.clone(), n.clone())));
             settings::group(
-                "Signing in at the console",
+                "Console Sign-In",
                 &settings::row(
-                    "Sign in without asking, as",
-                    "At this machine's own screen and keyboard, for an account that signs in without a password. Anyone else is asked as usual. It applies the next time the console's sign-in starts.",
-                    &settings::select("autologon", "Sign in without asking, as", &options, startup.may_login.is_ok()),
+                    "Automatic Sign-In",
+                    "Signs this account in at the machine's own screen without asking, if it has no password. Applies the next time the console sign-in starts.",
+                    &settings::select("autologon", "Automatic Sign-In", &options, startup.may_login.is_ok()),
                 ),
                 &match &startup.may_login {
                     Err(why) => settings::locked(why),
@@ -239,7 +239,7 @@ pub fn render(startup: &Startup, fields: &Fields) -> String {
     let mut rows = String::new();
     for (name, label, default, unit, applies) in TIMEOUTS {
         let field = settings::text(name, label, "text", Width::Short, may, r#"inputmode="numeric" autocomplete="off""#);
-        rows.push_str(&settings::row(label, &format!("{applies} Usually {default}."), &format!(r#"{field}<span class="value">{}</span>"#, escape(unit))));
+        rows.push_str(&settings::row(label, &format!("{applies} Default: {default}."), &format!(r#"{field}<span class="value">{}</span>"#, escape(unit))));
     }
     let changed = timeouts_changed(startup, fields);
     let mut foot = String::new();
@@ -256,50 +256,54 @@ pub fn render(startup: &Startup, fields: &Fields) -> String {
     let timeouts_group = format!(r#"<form fx-submit="save-timeouts">{}</form>"#, settings::group("Timeouts", &rows, &foot));
 
     // The kernel's command line.
-    let mut rows = settings::row("This boot", "", &settings::value(&startup.running, true));
+    let mut rows = settings::row("Current Boot", "", &settings::value(&startup.running, true));
     if let Some(next) = &startup.next
         && *next != startup.running
     {
-        rows.push_str(&settings::row("The next boot", "", &settings::value(next, true)));
+        rows.push_str(&settings::row("Next Boot", "", &settings::value(next, true)));
     }
     let mut foot = String::new();
     match (&startup.next, startup.rebuilds, &startup.may_cmdline) {
         (Some(next), true, Ok(())) => {
             let attempts: Vec<(String, String)> = (0..=10)
-                .map(|n| (n.to_string(), if n == 0 { "Never: always try a full boot".to_string() } else { format!("After {n} that never counted as good") }))
+                .map(|n| (n.to_string(), if n == 0 { "Never".to_string() } else { format!("After {n} failed boot{}", if n == 1 { "" } else { "s" }) }))
                 .collect();
-            let quiet: Vec<(String, String)> = [(0, "Everything"), (1, "Not over a sign-in prompt"), (2, "Only errors, and not over a sign-in prompt")]
+            let quiet: Vec<(String, String)> = [(0, "All Messages"), (1, "Hidden at Sign-In Prompts"), (2, "Errors Only")]
                 .iter()
                 .map(|(n, label)| (n.to_string(), label.to_string()))
                 .collect();
             rows.push_str(&settings::row(
-                "Start in recovery",
-                "How many boots in a row may fail to count as good before the machine starts in recovery, a shell with no services.",
-                &settings::select("bootattempts", "Start in recovery", &attempts, true),
+                "Start in Recovery",
+                "After this many failed boots in a row, the machine starts in recovery: a shell with no services.",
+                &settings::select("bootattempts", "Start in Recovery", &attempts, true),
             ));
-            rows.push_str(&settings::row("What peinit writes on the console", "", &settings::select("quiet", "What peinit writes on the console", &quiet, true)));
+            rows.push_str(&settings::row(
+                "Console Messages",
+                "What peinit writes to the console while the machine starts.",
+                &settings::select("quiet", "Console Messages", &quiet, true),
+            ));
             let changed = fields.get("bootattempts") != flag(next, ATTEMPTS).unwrap_or(DEFAULT_ATTEMPTS).to_string()
                 || fields.get("quiet") != flag(next, QUIET).unwrap_or(DEFAULT_QUIET).to_string();
             if changed {
                 foot.push_str(&settings::actions(&format!(
                     "{}{}",
                     settings::button("Undo", "undo-cmdline", &[], Weight::Plain, true),
-                    settings::submit("Apply at the next boot", Weight::Primary, true)
+                    settings::submit("Apply at Next Boot", Weight::Primary, true)
                 )));
             }
-            foot.push_str(&settings::hint("The boot image is made again when the command line changes, so these apply at the next boot."));
+            foot.push_str(&settings::hint("The boot image is rebuilt when the command line changes, so these apply at the next boot."));
         }
         (Some(_), true, Err(why)) => foot.push_str(&settings::locked(why)),
-        (_, true, _) => foot.push_str(&settings::hint("The boot image is made again when the command line changes, so a change applies at the next boot.")),
+        (_, true, _) => foot.push_str(&settings::hint("The boot image is rebuilt when the command line changes, so a change applies at the next boot.")),
         _ => foot.push_str(&settings::hint(
-            "The command line is part of the boot image, which is only made when Peios is installed or upgraded, so it is shown here and not changed.",
+            "The command line is part of the boot image, which is built when Peios is installed or upgraded, so it can't be changed here.",
         )),
     }
-    let cmdline_group = format!(r#"<form fx-submit="save-cmdline">{}</form>"#, settings::group("Kernel command line", &rows, &foot));
+    let cmdline_group = format!(r#"<form fx-submit="save-cmdline">{}</form>"#, settings::group("Kernel Command Line", &rows, &foot));
 
     format!(
         "{}{hero}{login_group}{timeouts_group}{cmdline_group}",
-        settings::head(Glyph::Power, Tile::Orange, "Startup & shutdown", "How this boot went, and how the machine starts and stops.")
+        settings::head(Glyph::Power, Tile::Orange, "Startup & Shutdown", "How the current boot went, and how the machine starts and stops.")
     )
 }
 
@@ -335,9 +339,9 @@ pub fn save_autologon(startup: &Startup, fields: &Fields) -> Result<String, Stri
     }
     reg::set(LOGIN_KEY, "signing in at the console", &[("Arguments", Some(Data::MultiSz(arguments)))])?;
     Ok(if chosen.is_empty() {
-        "The console will ask who is signing in.".into()
+        "Automatic sign-in is off.".into()
     } else {
-        format!("The console will sign {chosen} in without asking, if {chosen} signs in without a password.")
+        format!("The console signs {chosen} in automatically, if the account has no password.")
     })
 }
 

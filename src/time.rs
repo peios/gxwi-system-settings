@@ -182,13 +182,13 @@ pub fn render(time: &Time, zones: &[Listed], fields: &Fields, now: jiff::Timesta
         _ => String::new(),
     };
     let zone_group = settings::group(
-        "Time zone",
-        &settings::row("Time zone", "How every program shows the time. The clock itself keeps UTC.", &zone_select),
+        "Time Zone",
+        &settings::row("Time Zone", "Used by every program to show the time. The clock itself keeps UTC.", &zone_select),
         &not_used,
     );
 
     // Automatic, or by hand.
-    let mut setting = settings::row("Set the time automatically", &kept, &settings::switch("automatic", "Set the time automatically", may));
+    let mut setting = settings::row("Set Time Automatically", &kept, &settings::switch("automatic", "Set Time Automatically", may));
     if !time.policy.automatic {
         if may {
             let date = if fields.get("date").is_empty() { here.strftime("%Y-%m-%d").to_string() } else { fields.get("date").to_string() };
@@ -196,27 +196,27 @@ pub fn render(time: &Time, zones: &[Listed], fields: &Fields, now: jiff::Timesta
             setting.push_str(&settings::more(
                 More::Form,
                 &format!(
-                    r#"<form fx-submit="set-time"><p>Nothing checks a clock set by hand: it keeps time as well as this machine's own clock does. Times are in {zone}.</p>
+                    r#"<form fx-submit="set-time"><p>A clock set by hand isn't checked against a time server. Times are in {zone}.</p>
                        <div class="fields"><label>Date<input class="st-input wide" type="date" name="date" value="{date}"></label>
                        <label>Time<input class="st-input wide" type="time" name="clock" step="1" value="{clock}"></label></div>{actions}</form>"#,
                     zone = escape(&zone_in_force(time)),
                     date = escape(&date),
                     clock = escape(&clock),
-                    actions = settings::actions(&settings::submit("Set the clock", Kind::Primary, true)),
+                    actions = settings::actions(&settings::submit("Set Clock", Kind::Primary, true)),
                 ),
             ));
         }
     }
-    let setting_group = settings::group("Setting the clock", &setting, "");
+    let setting_group = settings::group("Clock", &setting, "");
 
     // Where the time comes from.
     let summary = if time.policy.servers.is_empty() {
-        "Peios's own four, run by three independent operators.".to_string()
+        "System Default: the Peios time servers.".to_string()
     } else {
         time.policy.servers.join(", ")
     };
     let mut servers = settings::row(
-        "Time servers",
+        "Servers",
         &summary,
         &if editing_servers || !may { String::new() } else { settings::button("Change…", "edit-servers", &[], Kind::Plain, true) },
     );
@@ -225,7 +225,7 @@ pub fn render(time: &Time, zones: &[Listed], fields: &Fields, now: jiff::Timesta
             More::Form,
             &format!(
                 r#"<form fx-submit="save-servers"><textarea class="st-input" name="servers" rows="4" spellcheck="false" aria-label="Time servers" placeholder="0.time.peios.org&#10;1.time.peios.org&#10;2.time.peios.org&#10;3.time.peios.org" fx-autofocus></textarea>
-                   <p>One a line, with a port after a colon if it isn't the usual, then <code>prefer</code> to lead with it, or <code>unauthenticated</code> for one that doesn't speak NTS. Empty uses Peios's own four. Name at least three, so that one wrong one is outvoted.</p>{}</form>"#,
+                   <p>One server per line, optionally with <code>:port</code>, then <code>prefer</code> to favour it or <code>unauthenticated</code> for a server without NTS. Leave empty for the System Default. Use at least three, so one wrong server is outvoted.</p>{}</form>"#,
                 settings::actions(&format!(
                     "{}{}",
                     settings::button("Cancel", "cancel-servers", &[], Kind::Plain, true),
@@ -235,23 +235,27 @@ pub fn render(time: &Time, zones: &[Listed], fields: &Fields, now: jiff::Timesta
         ));
     }
     servers.push_str(&settings::row(
-        "Allow servers that don't prove who they are",
-        "Plain NTP, without NTS. Anyone on the way could tell this machine the wrong time.",
-        &settings::switch("unauthenticated", "Allow servers that don't prove who they are", may),
+        "Allow Unauthenticated Servers",
+        "Plain NTP, without NTS. Anyone on the network path could send the wrong time.",
+        &settings::switch("unauthenticated", "Allow Unauthenticated Servers", may),
     ));
     servers.push_str(&settings::row(
-        "Use the network's time servers",
-        "The ones the network offers, when none are named above.",
-        &settings::switch("dhcp", "Use the network's time servers", may),
+        "Use Network Time Servers",
+        "Servers offered by the network (DHCP), when none are listed above.",
+        &settings::switch("dhcp", "Use Network Time Servers", may),
     ));
     let polls: Vec<(String, String)> = POLLS.map(|p| (p.to_string(), words::seconds(1u64 << p))).collect();
     servers.push_str(&settings::row(
-        "Check no more often than every",
-        "",
-        &settings::select("min-poll", "Check no more often than every", &polls, may),
+        "Minimum Poll Interval",
+        "The most often the servers are asked.",
+        &settings::select("min-poll", "Minimum Poll Interval", &polls, may),
     ));
-    servers.push_str(&settings::row("Check at least every", "", &settings::select("max-poll", "Check at least every", &polls, may)));
-    let servers_group = settings::group("Time servers", &servers, "");
+    servers.push_str(&settings::row(
+        "Maximum Poll Interval",
+        "The longest the servers go unasked.",
+        &settings::select("max-poll", "Maximum Poll Interval", &polls, may),
+    ));
+    let servers_group = settings::group("Time Servers", &servers, "");
 
     let heard = if time.sources.is_empty() {
         String::new()
@@ -262,8 +266,8 @@ pub fn render(time: &Time, zones: &[Listed], fields: &Fields, now: jiff::Timesta
             .map(|s| {
                 let mut lines = vec![(
                     format!(
-                        "{} · off by {} · heard {}",
-                        if s.auth == libtimed::Auth::Nts { "Proves itself (NTS)" } else { "Doesn't prove itself" },
+                        "{} · offset {} · last heard {}",
+                        if s.auth == libtimed::Auth::Nts { "Authenticated (NTS)" } else { "Unauthenticated" },
                         words::offset(s.offset),
                         words::ago(s.last).to_lowercase()
                     ),
@@ -286,19 +290,19 @@ pub fn render(time: &Time, zones: &[Listed], fields: &Fields, now: jiff::Timesta
                 )
             })
             .collect();
-        settings::group("What timed hears from them", &rows, "")
+        settings::group("Server Status", &rows, "")
     };
 
     format!(
         "{}{banner}{hero}{zone_group}{setting_group}{servers_group}{heard}",
-        settings::head(Glyph::Clock, Tile::Blue, "Time & date", "The machine's clock, and how every program shows it.")
+        settings::head(Glyph::Clock, Tile::Blue, "Time & Date", "The system clock and how times are shown.")
     )
 }
 
 /// The zones, by region, with UTC first and a chosen zone that isn't
 /// listed (an old name, one tzdata dropped) still there as chosen.
 fn zone_options(zones: &[Listed], chosen: &str) -> String {
-    let mut options = format!(r#"<option value=""{}>UTC — no time zone</option>"#, if chosen.is_empty() { " selected" } else { "" });
+    let mut options = format!(r#"<option value=""{}>UTC</option>"#, if chosen.is_empty() { " selected" } else { "" });
     let mut region = "";
     for listed in zones {
         let this_region = listed.name.split('/').next().unwrap_or("");
@@ -334,20 +338,20 @@ pub fn save_zone(fields: &Fields) -> Result<String, String> {
     let chosen = fields.get("zone").trim();
     if chosen.is_empty() {
         reg::set(TIME_KEY, "the time zone", &[(TIME_ZONE_VALUE, None)])?;
-        return Ok("The time zone is UTC.".into());
+        return Ok("Time zone set to UTC.".into());
     }
     zone::installed(chosen)?;
     reg::set(TIME_KEY, "the time zone", &[(TIME_ZONE_VALUE, Some(Data::Sz(chosen.to_string())))])?;
-    Ok(format!("The time zone is {chosen}."))
+    Ok(format!("Time zone set to {chosen}."))
 }
 
 /// Turns setting the time automatically on or off.
 pub fn set_automatic(on: bool) -> Result<String, String> {
     reg::set(TIME_KEY, "how the clock is set", &[(AUTOMATIC_VALUE, Some(Data::Dword(on as u32)))])?;
     Ok(if on {
-        "The clock is set automatically again. The first time servers to agree will set it.".into()
+        "Time is set automatically.".into()
     } else {
-        "The clock is set by hand now.".into()
+        "Automatic time is off. Set the clock below.".into()
     })
 }
 
@@ -367,7 +371,7 @@ pub fn set_clock(time: &Time, fields: &Fields) -> Result<String, String> {
         nanos: at.subsec_nanosecond().max(0) as u32,
     };
     match ask(request)? {
-        Reply::Ok => Ok(format!("The clock is set to {}.", zoned.strftime("%H:%M:%S on %A %-d %B %Y"))),
+        Reply::Ok => Ok(format!("Clock set to {}.", zoned.strftime("%H:%M:%S on %A %-d %B %Y"))),
         Reply::Error(why) if why == "not permitted" => Err("timed won't set the clock for you: its control right is needed, which as shipped only Administrators have.".into()),
         Reply::Error(why) => Err(format!("timed didn't set the clock: {why}.")),
         other => Err(format!("timed answered {other:?}.")),
@@ -388,9 +392,9 @@ pub fn save_servers(fields: &Fields) -> Result<String, String> {
     }
     reg::set(TIME_KEY, "the time servers", &[(SERVERS_VALUE, (!servers.is_empty()).then(|| Data::MultiSz(servers.clone())))])?;
     Ok(if servers.is_empty() {
-        "Peios's own time servers are used.".into()
+        "Time servers set to the System Default.".into()
     } else {
-        format!("{} time server{} named.", servers.len(), if servers.len() == 1 { " is" } else { "s are" })
+        format!("{} time server{} saved.", servers.len(), if servers.len() == 1 { "" } else { "s" })
     })
 }
 
@@ -406,7 +410,7 @@ pub fn save_options(fields: &Fields) -> Result<String, String> {
     };
     let (min, max) = (poll("min-poll")?, poll("max-poll")?);
     if max < min {
-        return Err("Checking at least every so often can't be more often than at most.".into());
+        return Err("The maximum poll interval can't be shorter than the minimum.".into());
     }
     let on = |name: &str| Data::Dword((fields.get(name) == "on") as u32);
     reg::set(
@@ -480,7 +484,7 @@ mod tests {
         let f = fields(&[("min-poll", "3"), ("max-poll", "10")]);
         assert!(save_options(&f).is_err());
         let f = fields(&[("min-poll", "12"), ("max-poll", "8")]);
-        assert!(save_options(&f).unwrap_err().contains("more often"));
+        assert!(save_options(&f).unwrap_err().contains("shorter than the minimum"));
     }
 
     #[test]

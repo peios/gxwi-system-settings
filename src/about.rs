@@ -154,7 +154,7 @@ pub fn fill(about: &About, fields: &mut Fields) {
 
 /// What the side says of this section.
 pub fn now(about: &About) -> String {
-    let name = if about.name.is_empty() { "No name yet" } else { &about.name };
+    let name = if about.name.is_empty() { "Unnamed" } else { &about.name };
     match &about.system {
         Some(system) => format!("{name} · {system}"),
         None => name.to_string(),
@@ -176,9 +176,9 @@ pub fn render(about: &About, fields: &Fields) -> String {
     let fact = |label: &str, value: &str| settings::fact(label, value, false);
 
     // What it is, large.
-    let up = about.uptime.map(|up| format!("Up for {}", words::uptime(up))).unwrap_or_default();
+    let up = about.uptime.map(|up| format!("Up {}", words::uptime(up))).unwrap_or_default();
     let hero = settings::hero(
-        &settings::hero_title(Glyph::Screen, Tile::Slate, if about.name.is_empty() { "No name yet" } else { &about.name }, &runs(about)),
+        &settings::hero_title(Glyph::Screen, Tile::Slate, if about.name.is_empty() { "Unnamed Machine" } else { &about.name }, &runs(about)),
         &if up.is_empty() { String::new() } else { settings::pill(&up, Tone::Good) },
     );
 
@@ -190,11 +190,11 @@ pub fn render(about: &About, fields: &Fields) -> String {
     let problem = if changed && !typed.trim().is_empty() { hostname::check(typed).err() } else { None };
     let mut control = settings::text(
         "hostname",
-        "This machine's name",
+        "Machine Name",
         "text",
         Width::Normal,
         may,
-        &format!(r#"autocomplete="off" spellcheck="false" maxlength="{}" placeholder="Give it a name""#, hostname::MAX),
+        &format!(r#"autocomplete="off" spellcheck="false" maxlength="{}" placeholder="Not set""#, hostname::MAX),
     );
     if may && changed {
         control.push_str(&settings::submit("Apply", Kind::Primary, problem.is_none()));
@@ -206,7 +206,7 @@ pub fn render(about: &About, fields: &Fields) -> String {
     if let Some(configured) = &about.configured
         && *configured != about.name
     {
-        foot.push_str(&settings::note(&format!("It is called {} now; netd hasn't made it {configured} yet.", about.name)));
+        foot.push_str(&settings::note(&format!("Currently {}; netd hasn't applied {configured} yet.", about.name)));
     }
     if let Err(why) = &about.may_name {
         foot.push_str(&settings::locked(why));
@@ -215,7 +215,7 @@ pub fn render(about: &About, fields: &Fields) -> String {
         r#"<form fx-submit="save-name">{}</form>"#,
         settings::group(
             "Name",
-            &settings::row("This machine's name", "How it is known on the network: letters, digits and hyphens, one word.", &control),
+            &settings::row("Machine Name", "How this machine is known on the network. Letters, digits and hyphens only.", &control),
             &foot
         )
     );
@@ -232,7 +232,7 @@ pub fn render(about: &About, fields: &Fields) -> String {
     }
     system.push_str(&settings::fact("Kernel", &about.kernel, true));
     if let Some(up) = about.uptime {
-        system.push_str(&fact("Up for", &words::uptime(up)));
+        system.push_str(&fact("Uptime", &words::uptime(up)));
     }
 
     let mut hardware = String::new();
@@ -258,12 +258,12 @@ pub fn render(about: &About, fields: &Fields) -> String {
         storage.push_str(&fact(&disk.name, &what));
     }
     if let Some((size, free)) = about.root {
-        storage.push_str(&fact("The system's filesystem", &format!("{} free of {}", words::bytes(free), words::bytes(size))));
+        storage.push_str(&fact("System Volume", &format!("{} free of {}", words::bytes(free), words::bytes(size))));
     }
 
     format!(
         "{}{hero}{name_group}{}{}{}",
-        settings::head(Glyph::Info, Tile::Slate, "About", "What this machine is and runs, and its name."),
+        settings::head(Glyph::Info, Tile::Slate, "About", "This machine's name, system and hardware."),
         settings::group("System", &system, ""),
         if hardware.is_empty() { String::new() } else { settings::group("Hardware", &hardware, "") },
         if storage.is_empty() { String::new() } else { settings::group("Storage", &storage, "") },
@@ -273,5 +273,5 @@ pub fn render(about: &About, fields: &Fields) -> String {
 pub fn save_name(fields: &Fields) -> Result<String, String> {
     let name = hostname::check(fields.get("hostname"))?;
     reg::set(NETWORK_KEY, "the machine's name", &[(HOSTNAME_VALUE, Some(Data::Sz(name.clone())))])?;
-    Ok(format!("This machine is called {name}."))
+    Ok(format!("Machine name set to {name}."))
 }

@@ -6,7 +6,7 @@ use libtimed::{SourceState, Status, Sync};
 /// How well the clock is being kept, in a sentence.
 pub fn keeping(status: &Status) -> String {
     if status.manual {
-        return "Set by hand. Nothing checks it against a time server.".into();
+        return "Set manually. It isn't checked against a time server.".into();
     }
     match status.sync {
         Sync::Synchronised | Sync::Settling => {
@@ -31,14 +31,14 @@ pub fn keeping(status: &Status) -> String {
 /// How well the clock is kept, in a few words for a pill, and how that reads.
 pub fn keeping_short(status: &Status) -> (String, Tone) {
     if status.manual {
-        return ("Set by hand".into(), Tone::Warn);
+        return ("Set manually".into(), Tone::Warn);
     }
     match status.sync {
-        Sync::Synchronised => (format!("In step with {}", status.system_peer.as_deref().unwrap_or("a time server")), Tone::Good),
-        Sync::Settling => (format!("Settling, from {}", status.system_peer.as_deref().unwrap_or("a time server")), Tone::Good),
-        Sync::Spike => ("Checking a jump".into(), Tone::Warn),
+        Sync::Synchronised => (format!("Synchronised with {}", status.system_peer.as_deref().unwrap_or("a time server")), Tone::Good),
+        Sync::Settling => (format!("Synchronising with {}", status.system_peer.as_deref().unwrap_or("a time server")), Tone::Good),
+        Sync::Spike => ("Verifying a time change".into(), Tone::Warn),
         Sync::Unsynchronised if status.sources == 0 => ("No time server".into(), Tone::Bad),
-        Sync::Unsynchronised => ("Not in step yet".into(), Tone::Warn),
+        Sync::Unsynchronised => ("Not synchronised".into(), Tone::Warn),
     }
 }
 
@@ -46,9 +46,9 @@ pub fn keeping_short(status: &Status) -> (String, Tone) {
 pub fn boot_short(boot: &peinit::client::Boot) -> (String, Tone) {
     match (boot.mode.as_str(), boot.confirmed, &boot.confirm_error) {
         ("safe", ..) => ("Safe mode".into(), Tone::Bad),
-        (_, _, Some(_)) => ("Won't count as good".into(), Tone::Bad),
-        (_, true, _) => ("Counts as good".into(), Tone::Good),
-        _ => ("Not counted yet".into(), Tone::Warn),
+        (_, _, Some(_)) => ("Boot will count as failed".into(), Tone::Bad),
+        (_, true, _) => ("Healthy".into(), Tone::Good),
+        _ => ("Confirming".into(), Tone::Warn),
     }
 }
 
@@ -91,12 +91,12 @@ pub fn seconds(n: u64) -> String {
 
 pub fn source_state(state: SourceState) -> &'static str {
     match state {
-        SourceState::SystemPeer => "Followed",
-        SourceState::Candidate => "Agrees",
-        SourceState::Outlier => "Agrees, but noisy",
-        SourceState::Falseticker => "Disagrees",
-        SourceState::Unreachable => "Not answering",
-        SourceState::Unusable => "Not usable",
+        SourceState::SystemPeer => "In Use",
+        SourceState::Candidate => "Candidate",
+        SourceState::Outlier => "Outlier",
+        SourceState::Falseticker => "Rejected",
+        SourceState::Unreachable => "Unreachable",
+        SourceState::Unusable => "Unusable",
     }
 }
 
@@ -164,15 +164,15 @@ pub fn uptime(seconds: u64) -> String {
 /// Which way this boot started, and why.
 pub fn boot_mode(boot: &peinit::client::Boot) -> String {
     let mode = match boot.mode.as_str() {
-        "full" => "Normally",
-        "safe" => "In safe mode: only what the machine needs to start",
-        "recovery" => "In recovery",
+        "full" => "Normal boot",
+        "safe" => "Safe mode, with essential services only",
+        "recovery" => "Recovery",
         other => other,
     };
     match boot.reason.as_str() {
-        "requested" => format!("{mode}, because the boot asked for it (peios.safemode=1)"),
-        "safe_mode_downgrade" if boot.downgrade.is_empty() => format!("{mode}, because a full boot couldn't be planned"),
-        "safe_mode_downgrade" => format!("{mode}, because a full boot couldn't be planned: {}", boot.downgrade.join("; ")),
+        "requested" => format!("{mode}, as requested by peios.safemode=1"),
+        "safe_mode_downgrade" if boot.downgrade.is_empty() => format!("{mode}, because a normal boot couldn't be planned"),
+        "safe_mode_downgrade" => format!("{mode}, because a normal boot couldn't be planned: {}", boot.downgrade.join("; ")),
         _ => mode.to_string(),
     }
 }
@@ -180,23 +180,19 @@ pub fn boot_mode(boot: &peinit::client::Boot) -> String {
 /// Whether this boot has counted as good yet, and how many before it didn't.
 pub fn boot_health(boot: &peinit::client::Boot) -> String {
     let good = if boot.confirmed {
-        "This boot counts as good.".to_string()
+        "Confirmed as a successful boot.".to_string()
     } else if let Some(why) = &boot.confirm_error {
-        format!("This boot can't be counted as good, so the next boot will count it as failed: {why}.")
+        format!("This boot can't be confirmed and will count as failed: {why}.")
     } else if !boot.waiting_on.is_empty() {
-        format!(
-            "Not yet counted as good: waiting for {} to keep running for {} seconds.",
-            boot.waiting_on.join(", "),
-            boot.grace_seconds
-        )
+        format!("Confirming: waiting for {} to run for {} seconds.", boot.waiting_on.join(", "), boot.grace_seconds)
     } else {
-        format!("Not yet counted as good: its essential services have to keep running for {} seconds.", boot.grace_seconds)
+        format!("Confirming: essential services must run for {} seconds.", boot.grace_seconds)
     };
     let before = match (boot.attempts, boot.max_attempts) {
         (0, _) => String::new(),
-        (n, 0) => format!(" {n} boot{} before it never counted as good.", if n == 1 { "" } else { "s" }),
+        (n, 0) => format!(" {n} failed boot{} before this one.", if n == 1 { "" } else { "s" }),
         (n, max) => format!(
-            " {n} boot{} before it never counted as good; after {max} in a row, the machine starts in recovery.",
+            " {n} failed boot{} before this one; after {max} in a row, the machine starts in recovery.",
             if n == 1 { "" } else { "s" }
         ),
     };
@@ -232,7 +228,7 @@ mod tests {
     #[test]
     fn a_status_says_how_the_clock_is_kept() {
         let manual = Status { manual: true, ..Status::default() };
-        assert!(keeping(&manual).starts_with("Set by hand"));
+        assert!(keeping(&manual).starts_with("Set manually"));
         let none = Status::default();
         assert!(keeping(&none).contains("no time server"));
         let kept = Status {
