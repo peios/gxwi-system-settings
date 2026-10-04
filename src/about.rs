@@ -4,7 +4,8 @@
 //! `/proc`, `/sys` — except the name, which is
 //! `Machine\System\Network Hostname`, which netd applies as it changes.
 
-use libgxwi::{Fields, escape};
+use libgxwi::Fields;
+use libgxwi::settings::{self, Glyph, Kind, Tile, Tone, Width};
 use libnetd::NETWORK_KEY;
 use libnetd::hostname::{self, HOSTNAME_VALUE};
 use peios::registry::Data;
@@ -60,6 +61,8 @@ pub fn read() -> About {
             (String::new(), String::new())
         }
     };
+    // A machine nothing has named is "(none)" to the kernel, which is no name.
+    let name = if name == "(none)" { String::new() } else { name };
     About {
         system: field("PRETTY_NAME").or_else(|| field("NAME")),
         version: field("VERSION_ID"),
@@ -149,68 +152,101 @@ pub fn fill(about: &About, fields: &mut Fields) {
     fields.set("hostname", about.configured.as_deref().unwrap_or(&about.name));
 }
 
-pub fn render(about: &About, fields: &Fields) -> String {
-    let row = |label: &str, value: &str| format!("<dt>{}</dt><dd>{}</dd>", escape(label), escape(value));
-    let mut system = String::new();
-    if let Some(name) = &about.system {
-        system.push_str(&row("System", name));
+/// What the side says of this section.
+pub fn now(about: &About) -> String {
+    let name = if about.name.is_empty() { "No name yet" } else { &about.name };
+    match &about.system {
+        Some(system) => format!("{name} · {system}"),
+        None => name.to_string(),
     }
-    if let Some(edition) = &about.edition {
-        system.push_str(&row("Edition", edition));
-    }
-    if let Some(version) = &about.version {
-        system.push_str(&row("Version", version));
-    }
-    system.push_str(&row("Kernel", &about.kernel));
-    if let Some(up) = about.uptime {
-        system.push_str(&row("Up for", &words::uptime(up)));
-    }
+}
 
+/// What it runs, once: os-release's pretty name, with the edition when the
+/// name doesn't already say it.
+fn runs(about: &About) -> String {
+    match (&about.system, &about.edition) {
+        (Some(system), Some(edition)) if !system.contains(edition.as_str()) => format!("{system} · {edition}"),
+        (Some(system), _) => system.clone(),
+        (None, Some(edition)) => edition.clone(),
+        (None, None) => String::new(),
+    }
+}
+
+pub fn render(about: &About, fields: &Fields) -> String {
+    let fact = |label: &str, value: &str| settings::fact(label, value, false);
+
+    // What it is, large.
+    let up = about.uptime.map(|up| format!("Up for {}", words::uptime(up))).unwrap_or_default();
+    let hero = settings::hero(
+        &settings::hero_title(Glyph::Screen, Tile::Slate, if about.name.is_empty() { "No name yet" } else { &about.name }, &runs(about)),
+        &if up.is_empty() { String::new() } else { settings::pill(&up, Tone::Good) },
+    );
+
+    // Its name.
     let may = about.may_name.is_ok();
     let typed = fields.get("hostname");
-    let changed = typed.trim() != about.configured.as_deref().unwrap_or(&about.name);
-    let problem = if changed && !typed.trim().is_empty() {
-        hostname::check(typed).err().map(|why| format!("<p class=\"note bad\">{}</p>", escape(&why))).unwrap_or_default()
-    } else {
-        String::new()
-    };
-    let differs = match &about.configured {
-        Some(configured) if *configured != about.name => format!(
-            "<p class=\"note\">{}</p>",
-            escape(&format!("It is called {} now; netd hasn't made it {configured} yet.", about.name))
-        ),
-        _ => String::new(),
-    };
-    let name_card = format!(
-        "<section class=\"card\" aria-label=\"Name\"><h2>Name</h2>\
-         <form class=\"edit\" fx-submit=\"save-name\">\
-         <label>This machine's name<input name=\"hostname\" autocomplete=\"off\" spellcheck=\"false\" maxlength=\"{max}\"{d}></label>\
-         <p class=\"hint\">How it is known on the network: letters, digits and hyphens, one word.</p>{problem}{differs}{save}</form>{why}</section>",
-        max = hostname::MAX,
-        d = if may { "" } else { " disabled" },
-        save = if may {
-            format!("<div class=\"actions\"><button class=\"primary\"{}>Save</button></div>", if changed && problem.is_empty() { "" } else { " disabled" })
-        } else {
-            String::new()
-        },
-        why = match &about.may_name {
-            Ok(()) => String::new(),
-            Err(why) => format!("<p class=\"why\">{}</p>", escape(why)),
-        },
+    let configured = about.configured.as_deref().unwrap_or(&about.name);
+    let changed = typed.trim() != configured;
+    let problem = if changed && !typed.trim().is_empty() { hostname::check(typed).err() } else { None };
+    let mut control = settings::text(
+        "hostname",
+        "This machine's name",
+        "text",
+        Width::Normal,
+        may,
+        &format!(r#"autocomplete="off" spellcheck="false" maxlength="{}" placeholder="Give it a name""#, hostname::MAX),
     );
+    if may && changed {
+        control.push_str(&settings::submit("Apply", Kind::Primary, problem.is_none()));
+    }
+    let mut foot = String::new();
+    if let Some(why) = &problem {
+        foot.push_str(&settings::note(why));
+    }
+    if let Some(configured) = &about.configured
+        && *configured != about.name
+    {
+        foot.push_str(&settings::note(&format!("It is called {} now; netd hasn't made it {configured} yet.", about.name)));
+    }
+    if let Err(why) = &about.may_name {
+        foot.push_str(&settings::locked(why));
+    }
+    let name_group = format!(
+        r#"<form fx-submit="save-name">{}</form>"#,
+        settings::group(
+            "Name",
+            &settings::row("This machine's name", "How it is known on the network: letters, digits and hyphens, one word.", &control),
+            &foot
+        )
+    );
+
+    let mut system = String::new();
+    if let Some(name) = &about.system {
+        system.push_str(&fact("System", name));
+    }
+    if let Some(edition) = &about.edition {
+        system.push_str(&fact("Edition", edition));
+    }
+    if let Some(version) = &about.version {
+        system.push_str(&fact("Version", version));
+    }
+    system.push_str(&settings::fact("Kernel", &about.kernel, true));
+    if let Some(up) = about.uptime {
+        system.push_str(&fact("Up for", &words::uptime(up)));
+    }
 
     let mut hardware = String::new();
     match (&about.maker, &about.model) {
-        (Some(maker), Some(model)) => hardware.push_str(&row("Computer", &format!("{maker} {model}"))),
-        (Some(one), None) | (None, Some(one)) => hardware.push_str(&row("Computer", one)),
+        (Some(maker), Some(model)) => hardware.push_str(&fact("Computer", &format!("{maker} {model}"))),
+        (Some(one), None) | (None, Some(one)) => hardware.push_str(&fact("Computer", one)),
         (None, None) => {}
     }
     if let Some(processor) = &about.processor {
         let count = if about.processors > 1 { format!(", {} processors", about.processors) } else { String::new() };
-        hardware.push_str(&row("Processor", &format!("{processor}{count}")));
+        hardware.push_str(&fact("Processor", &format!("{processor}{count}")));
     }
     if let Some(memory) = about.memory {
-        hardware.push_str(&row("Memory", &words::bytes(memory)));
+        hardware.push_str(&fact("Memory", &words::bytes(memory)));
     }
 
     let mut storage = String::new();
@@ -219,18 +255,18 @@ pub fn render(about: &About, fields: &Fields) -> String {
             Some(model) => format!("{}, {model}{}", words::bytes(disk.size), if disk.removable { ", removable" } else { "" }),
             None => format!("{}{}", words::bytes(disk.size), if disk.removable { ", removable" } else { "" }),
         };
-        storage.push_str(&row(&disk.name, &what));
+        storage.push_str(&fact(&disk.name, &what));
     }
     if let Some((size, free)) = about.root {
-        storage.push_str(&row("The system's filesystem", &format!("{} free of {}", words::bytes(free), words::bytes(size))));
+        storage.push_str(&fact("The system's filesystem", &format!("{} free of {}", words::bytes(free), words::bytes(size))));
     }
 
     format!(
-        "<section class=\"card\" aria-label=\"This machine\"><h2>This machine</h2><dl class=\"facts\">{system}</dl></section>\
-         {name_card}\
-         <section class=\"card\" aria-label=\"Hardware\"><h2>Hardware</h2><dl class=\"facts\">{hardware}</dl></section>\
-         <section class=\"card\" aria-label=\"Storage\"><h2>Storage</h2><dl class=\"facts\">{storage}</dl>\
-         </section>"
+        "{}{hero}{name_group}{}{}{}",
+        settings::head(Glyph::Info, Tile::Slate, "About", "What this machine is and runs, and its name."),
+        settings::group("System", &system, ""),
+        if hardware.is_empty() { String::new() } else { settings::group("Hardware", &hardware, "") },
+        if storage.is_empty() { String::new() } else { settings::group("Storage", &storage, "") },
     )
 }
 

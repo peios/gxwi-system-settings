@@ -60,12 +60,12 @@ pub fn may_change(path: &str, what: &str) -> Result<(), String> {
     }
 }
 
-/// Why a change was refused, in words.
-pub fn refused(error: &peios::Error, what: &str, path: &str) -> String {
+/// Why a change was refused, in words. The key is not named: who may write
+/// it is what the person needs to know, and the key's own descriptor is
+/// what decides, which as shipped lets only Administrators.
+pub fn refused(error: &peios::Error, what: &str, _path: &str) -> String {
     match error.kind() {
-        ErrorKind::PermissionDenied => format!(
-            "You may look, but changing {what} needs write access to {path}, which as shipped only Administrators have."
-        ),
+        ErrorKind::PermissionDenied => format!("You can look, but you can't change {what}: as shipped, only Administrators can."),
         _ => format!("{what} can't be changed: {error}."),
     }
 }

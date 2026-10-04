@@ -6,6 +6,7 @@
 //! starts. The layout is `Machine\System\Console Keymap`, loaded by the
 //! console-keymap service, which is restarted to load a new one.
 
+use libgxwi::settings::{self, Glyph, Tile};
 use libgxwi::{Fields, escape};
 use libsession::locale::{self, Available};
 use peinit::client::{Command, ControlClient, ServiceAccess};
@@ -147,55 +148,72 @@ fn describe(available: &Available) -> String {
     }
 }
 
+/// A language in a few words, for the side: "English (UK)".
+fn short(lang: &str, installed: &Installed) -> String {
+    match installed.locales.iter().find(|a| a.name == lang) {
+        Some(Available { language: Some(language), territory: Some(territory), .. }) => {
+            let place = match territory.as_str() {
+                "United Kingdom" => "UK",
+                "United States" => "US",
+                other => other,
+            };
+            format!("{language} ({place})")
+        }
+        Some(Available { language: Some(language), .. }) => language.clone(),
+        _ if lang == locale::DEFAULT => "Plain English".into(),
+        _ => lang.to_string(),
+    }
+}
+
+/// What the side says of this section.
+pub fn now(language: &Language, installed: &Installed) -> String {
+    let lang = short(language.lang.as_deref().unwrap_or(locale::DEFAULT), installed);
+    let keymap = match language.keymap.as_deref() {
+        None => "US keyboard".to_string(),
+        Some(map) => format!("{} keyboard", map.to_uppercase()),
+    };
+    format!("{lang} · {keymap}")
+}
+
 pub fn render(language: &Language, installed: &Installed, fields: &Fields) -> String {
     let may_locale = language.may_locale.is_ok();
-    let off = |may: bool| if may { "" } else { " disabled" };
-
-    let options = |chosen: &str, first: Option<&str>| {
-        let mut html = String::new();
-        if let Some(first) = first {
-            html.push_str(&format!("<option value=\"\"{}>{}</option>", if chosen.is_empty() { " selected" } else { "" }, escape(first)));
-        }
-        for available in &installed.locales {
-            html.push_str(&format!(
-                "<option value=\"{v}\"{s}>{l}</option>",
-                v = escape(&available.name),
-                s = if chosen == available.name { " selected" } else { "" },
-                l = escape(&describe(available))
-            ));
-        }
+    let locales = |first: Option<&str>, chosen: &str| {
+        let mut options: Vec<(String, String)> = first.map(|f| vec![(String::new(), f.to_string())]).unwrap_or_default();
+        options.extend(installed.locales.iter().map(|a| (a.name.clone(), describe(a))));
         if !chosen.is_empty() && !installed.locales.iter().any(|a| a.name == chosen) {
-            html.push_str(&format!("<option value=\"{v}\" selected>{v} — not installed</option>", v = escape(chosen)));
+            options.push((chosen.to_string(), format!("{chosen} — not installed")));
         }
-        html
+        options
     };
     let mixed = language.formats.as_deref() == Some("");
-    let formats_chosen = fields.get("formats");
-    let changed = fields.get("lang") != language.lang.as_deref().unwrap_or(locale::DEFAULT)
-        || formats_chosen != language.formats.as_deref().unwrap_or("");
-    let mixed_note = if mixed {
-        "<p class=\"note\">The formats are set one by one, to different languages. Choosing here sets them all.</p>"
-    } else {
-        ""
-    };
-    let language_card = format!(
-        "<section class=\"card\" aria-label=\"Language and formats\"><h2>Language and formats</h2>\
-         <form class=\"edit\" fx-submit=\"save-language\">\
-         <label>Language<select name=\"lang\"{d}>{langs}</select></label>\
-         <label>Formats<select name=\"formats\"{d}>{formats}</select></label>{mixed_note}\
-         <p class=\"hint\">Formats are how dates, numbers, money, measures and paper sizes are written. Each person may choose their own in My Settings; this is for everyone who hasn't. It applies to sessions that start after this.</p>\
-         <p class=\"hint\">Another language is added by installing its language pack: <code>peipkg install org.gnu.glibc-langpack-</code> and the language's code, such as <code>de</code>.</p>\
-         {save}</form>{why}</section>",
-        d = off(may_locale),
-        langs = options(fields.get("lang"), None),
-        formats = options(if mixed && formats_chosen.is_empty() { "" } else { formats_chosen }, Some("The same as the language")),
-        save = save(may_locale, changed),
-        why = why(&language.may_locale),
+    let mut foot = String::new();
+    if mixed {
+        foot.push_str(&settings::note("The formats are set one by one, to different languages. Choosing here sets them all."));
+    }
+    foot.push_str(&match &language.may_locale {
+        Err(why) => settings::locked(why),
+        Ok(()) => settings::hint(
+            "Another language is added by installing its language pack, such as org.gnu.glibc-langpack-de for German.",
+        ),
+    });
+    let rows = format!(
+        "{}{}",
+        settings::row(
+            "Language",
+            "For everyone who hasn't chosen their own in My Settings. Sessions that start after this use it.",
+            &settings::select("lang", "Language", &locales(None, fields.get("lang")), may_locale),
+        ),
+        settings::row(
+            "Formats",
+            "How dates, numbers, money, measures and paper sizes are written.",
+            &settings::select("formats", "Formats", &locales(Some("The same as the language"), fields.get("formats")), may_locale),
+        ),
     );
+    let language_group = settings::group("Language and formats", &rows, &foot);
 
     let may_keymap = language.may_keymap.is_ok();
     let chosen = fields.get("keymap");
-    let mut maps = format!("<option value=\"\"{}>US — built in</option>", if chosen.is_empty() { " selected" } else { "" });
+    let mut maps = format!(r#"<option value=""{}>US — built in</option>"#, if chosen.is_empty() { " selected" } else { "" });
     for (family, names) in &installed.keymaps {
         maps.push_str(&format!("<optgroup label=\"{}\">", escape(&family_name(family))));
         for name in names {
@@ -207,22 +225,30 @@ pub fn render(language: &Language, installed: &Installed, fields: &Fields) -> St
         }
         maps.push_str("</optgroup>");
     }
-    let keymap_changed = chosen != language.keymap.as_deref().unwrap_or("");
-    let loader = match &language.loader {
-        Ok(()) => String::new(),
-        Err(NotNow::NextBoot(why) | NotNow::Never(why)) => format!("<p class=\"note\">{}</p>", escape(why)),
-    };
-    let keyboard_card = format!(
-        "<section class=\"card\" aria-label=\"Console keyboard\"><h2>Console keyboard</h2>\
-         <form class=\"edit\" fx-submit=\"save-keymap\">\
-         <label>Layout<select name=\"keymap\"{d}>{maps}</select></label>\
-         <p class=\"hint\">The layout of the keyboard plugged into this machine, on its text consoles. The desktop's keyboard is the browser's, and a terminal over SSH uses the computer it's typed on.</p>\
-         {loader}{save}</form>{why}</section>",
-        d = off(may_keymap),
-        save = save(may_keymap, keymap_changed),
-        why = why(&language.may_keymap),
+    let layout = format!(
+        r#"<select class="st-select" name="keymap" aria-label="Layout"{}>{maps}</select>"#,
+        if may_keymap { "" } else { " disabled" }
     );
-    format!("{language_card}{keyboard_card}")
+    let mut foot = String::new();
+    if let Err(NotNow::NextBoot(why) | NotNow::Never(why)) = &language.loader {
+        foot.push_str(&settings::note(why));
+    }
+    if let Err(why) = &language.may_keymap {
+        foot.push_str(&settings::locked(why));
+    }
+    let keyboard_group = settings::group(
+        "Keyboard at the console",
+        &settings::row(
+            "Layout",
+            "The keyboard plugged into this machine, on its text consoles. The desktop uses the browser's, and SSH the computer it's typed on.",
+            &layout,
+        ),
+        &foot,
+    );
+    format!(
+        "{}{language_group}{keyboard_group}",
+        settings::head(Glyph::Globe, Tile::Violet, "Language & keyboard", "What everyone's sessions start in, and the console's keyboard.")
+    )
 }
 
 fn family_name(family: &str) -> String {
@@ -236,20 +262,6 @@ fn family_name(family: &str) -> String {
         "neo" => "Neo".into(),
         "olpc" => "OLPC".into(),
         other => other.to_string(),
-    }
-}
-
-fn save(may: bool, changed: bool) -> String {
-    if !may {
-        return String::new();
-    }
-    format!("<div class=\"actions\"><button class=\"primary\"{}>Save</button></div>", if changed { "" } else { " disabled" })
-}
-
-fn why(may: &Result<(), String>) -> String {
-    match may {
-        Ok(()) => String::new(),
-        Err(why) => format!("<p class=\"why\">{}</p>", escape(why)),
     }
 }
 
@@ -297,6 +309,15 @@ pub fn save_keymap(language: &Language, installed: &Installed, fields: &Fields) 
     Ok(format!("The console's layout is {name}."))
 }
 
+/// Applies a field that applies as it changes.
+pub fn apply(name: &str, language: &Language, installed: &Installed, fields: &Fields) -> Option<Result<String, String>> {
+    Some(match name {
+        "lang" | "formats" => save_language(fields),
+        "keymap" => save_keymap(language, installed, fields),
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -307,6 +328,9 @@ mod tests {
         assert_eq!(describe(&gb), "English (United Kingdom) — en_GB.UTF-8");
         let c = Available { name: "C.UTF-8".into(), language: None, territory: None };
         assert!(describe(&c).starts_with("Plain English"));
+        let installed = Installed { locales: vec![gb], keymaps: Vec::new() };
+        assert_eq!(short("en_GB.UTF-8", &installed), "English (UK)");
+        assert_eq!(short("C.UTF-8", &installed), "Plain English");
     }
 
     #[test]

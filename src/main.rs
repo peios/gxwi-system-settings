@@ -77,6 +77,7 @@ fn main() {
             std::process::exit(1);
         }
     };
+    libgxwi::settings::stylesheet(&mut app);
     app.stylesheet("/gxwi-system-settings.css", include_str!("gxwi-system-settings.css"));
     let ident = Ident::new();
     let read = Read::now(&ident);

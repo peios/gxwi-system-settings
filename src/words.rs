@@ -1,5 +1,6 @@
 //! What the window says, in words.
 
+use libgxwi::settings::Tone;
 use libtimed::{SourceState, Status, Sync};
 
 /// How well the clock is being kept, in a sentence.
@@ -24,6 +25,30 @@ pub fn keeping(status: &Status) -> String {
             status.sources,
             if status.sources == 1 { "" } else { "s" }
         ),
+    }
+}
+
+/// How well the clock is kept, in a few words for a pill, and how that reads.
+pub fn keeping_short(status: &Status) -> (String, Tone) {
+    if status.manual {
+        return ("Set by hand".into(), Tone::Warn);
+    }
+    match status.sync {
+        Sync::Synchronised => (format!("In step with {}", status.system_peer.as_deref().unwrap_or("a time server")), Tone::Good),
+        Sync::Settling => (format!("Settling, from {}", status.system_peer.as_deref().unwrap_or("a time server")), Tone::Good),
+        Sync::Spike => ("Checking a jump".into(), Tone::Warn),
+        Sync::Unsynchronised if status.sources == 0 => ("No time server".into(), Tone::Bad),
+        Sync::Unsynchronised => ("Not in step yet".into(), Tone::Warn),
+    }
+}
+
+/// How this boot went, in a few words for a pill, and how that reads.
+pub fn boot_short(boot: &peinit::client::Boot) -> (String, Tone) {
+    match (boot.mode.as_str(), boot.confirmed, &boot.confirm_error) {
+        ("safe", ..) => ("Safe mode".into(), Tone::Bad),
+        (_, _, Some(_)) => ("Won't count as good".into(), Tone::Bad),
+        (_, true, _) => ("Counts as good".into(), Tone::Good),
+        _ => ("Not counted yet".into(), Tone::Warn),
     }
 }
 

@@ -11,6 +11,7 @@
 
 use libauthd::ident::{Fields as Asked, Kind};
 use libauthd_client::ident::Ident;
+use libgxwi::settings::{self, Glyph, Kind as Weight, Tile, Width};
 use libgxwi::{Fields, escape};
 use peinit::client::{Boot, ControlClient};
 use peios::registry::Data;
@@ -102,9 +103,9 @@ pub fn read(ident: &Ident) -> Startup {
         next: std::fs::read_to_string(NEXT_CMDLINE).ok().map(|t| t.trim().to_string()),
         rebuilds: reg::exists(REBUILDER_KEY) && reg::number(REBUILDER_KEY, "Disabled").is_none_or(|d| d == 0),
         may_cmdline: std::fs::OpenOptions::new().write(true).open(NEXT_CMDLINE).map(|_| ()).map_err(|e| match e.kind() {
-            std::io::ErrorKind::PermissionDenied => format!(
-                "You may look, but changing the next boot's command line needs write access to {NEXT_CMDLINE}, which as shipped only Administrators have."
-            ),
+            std::io::ErrorKind::PermissionDenied => {
+                "You can look, but you can't change the next boot's command line: as shipped, only Administrators can.".to_string()
+            }
             std::io::ErrorKind::NotFound => "This machine has no command line to change: it boots from its install image.".to_string(),
             _ => format!("The next boot's command line can't be changed: {e}."),
         }),
@@ -172,129 +173,134 @@ pub fn save_cmdline(startup: &Startup, fields: &Fields) -> Result<String, String
     Ok("Saved. It applies at the next boot.".into())
 }
 
+/// What the side says of this section.
+pub fn now(startup: &Startup) -> String {
+    match &startup.boot {
+        Ok(boot) if boot.mode == "safe" => "Started in safe mode".into(),
+        Ok(boot) => format!("Started normally · {}", crate::words::boot_short(boot).0.to_lowercase()),
+        Err(_) => "How it started is unknown".into(),
+    }
+}
+
+/// Whether any timeout field differs from what is set.
+pub fn timeouts_changed(startup: &Startup, fields: &Fields) -> bool {
+    TIMEOUTS.iter().zip(&startup.timeouts).any(|((name, _, default, ..), value)| fields.get(name).trim() != value.unwrap_or(*default).to_string())
+}
+
 pub fn render(startup: &Startup, fields: &Fields) -> String {
-    let boot = match &startup.boot {
-        Err(why) => format!("<p class=\"note bad\">{}</p>", escape(why)),
+    let hero = match &startup.boot {
+        Err(why) => settings::hero(&settings::hero_title(Glyph::Power, Tile::Orange, "This boot", why), ""),
         Ok(boot) => {
-            let mut facts = format!("<dt>Started in</dt><dd>{}</dd>", escape(&crate::words::boot_mode(boot)));
-            facts.push_str(&format!("<dt>Health</dt><dd>{}</dd>", escape(&crate::words::boot_health(boot))));
-            format!("<dl class=\"facts\">{facts}</dl>")
+            let (said, tone) = crate::words::boot_short(boot);
+            let title = match boot.mode.as_str() {
+                "safe" => "Started in safe mode",
+                "recovery" => "In recovery",
+                _ => "Started normally",
+            };
+            // Why it is in that mode, when it isn't the usual.
+            let about = if boot.reason == "normal" {
+                crate::words::boot_health(boot)
+            } else {
+                format!("{}. {}", crate::words::boot_mode(boot), crate::words::boot_health(boot))
+            };
+            settings::hero(&settings::hero_title(Glyph::Power, Tile::Orange, title, &about), &settings::pill(&said, tone))
         }
     };
-    let boot_card = format!("<section class=\"card\" aria-label=\"This boot\"><h2>This boot</h2>{boot}</section>");
 
-    let may = startup.may_boot.is_ok();
-    let off = if may { "" } else { " disabled" };
-    let mut rows = String::new();
-    let mut changed = false;
-    for ((name, label, default, unit, applies), value) in TIMEOUTS.iter().zip(&startup.timeouts) {
-        let typed = fields.get(name);
-        changed |= typed.trim() != value.unwrap_or(*default).to_string();
-        rows.push_str(&format!(
-            "<label>{label}<span class=\"amount\"><input name=\"{name}\" inputmode=\"numeric\" autocomplete=\"off\"{off}> {unit}</span></label>\
-             <p class=\"hint\">{applies} Usually {default}.</p>",
-            label = escape(label),
-            unit = escape(unit),
-            applies = escape(applies),
-        ));
-    }
-    let timeouts_card = format!(
-        "<section class=\"card\" aria-label=\"Timeouts\"><h2>Timeouts</h2>\
-         <form class=\"edit\" fx-submit=\"save-timeouts\">{rows}{save}</form>{why}</section>",
-        save = save(may, changed),
-        why = why(&startup.may_boot),
-    );
-
-    let login_card = match &startup.autologon {
-        Err(why) => format!("<section class=\"card\" aria-label=\"Signing in at the console\"><h2>Signing in at the console</h2><p class=\"note\">{}</p></section>", escape(why)),
+    // Signing in at the console.
+    let login_group = match &startup.autologon {
+        Err(why) => settings::group("Signing in at the console", &settings::row("Sign in without asking", why, ""), ""),
         Ok(current) => {
-            let may = startup.may_login.is_ok();
-            let chosen = fields.get("autologon");
-            let mut options = format!("<option value=\"\"{}>Nobody: always ask</option>", if chosen.is_empty() { " selected" } else { "" });
             let mut names = startup.accounts.clone();
             if let Some(current) = current
                 && !names.contains(current)
             {
                 names.push(current.clone());
             }
-            for name in &names {
-                options.push_str(&format!("<option value=\"{n}\"{s}>{n}</option>", n = escape(name), s = if chosen == name { " selected" } else { "" }));
-            }
-            format!(
-                "<section class=\"card\" aria-label=\"Signing in at the console\"><h2>Signing in at the console</h2>\
-                 <form class=\"edit\" fx-submit=\"save-autologon\">\
-                 <label>Sign in without asking, as<select name=\"autologon\"{off}>{options}</select></label>\
-                 <p class=\"hint\">At this machine's own screen and keyboard. It works only for an account that signs in without a password; anyone else is asked as usual. It applies the next time the console's sign-in starts, at the latest the next boot.</p>\
-                 {save}</form>{why}</section>",
-                off = if may { "" } else { " disabled" },
-                save = save(may, chosen != current.as_deref().unwrap_or("")),
-                why = why(&startup.may_login),
+            let mut options = vec![(String::new(), "Nobody: always ask".to_string())];
+            options.extend(names.iter().map(|n| (n.clone(), n.clone())));
+            settings::group(
+                "Signing in at the console",
+                &settings::row(
+                    "Sign in without asking, as",
+                    "At this machine's own screen and keyboard, for an account that signs in without a password. Anyone else is asked as usual. It applies the next time the console's sign-in starts.",
+                    &settings::select("autologon", "Sign in without asking, as", &options, startup.may_login.is_ok()),
+                ),
+                &match &startup.may_login {
+                    Err(why) => settings::locked(why),
+                    Ok(()) => String::new(),
+                },
             )
         }
     };
 
-    let next = match &startup.next {
-        Some(next) if *next != startup.running => format!(
-            "<dt>Next boot</dt><dd><code>{}</code></dd>",
-            escape(next)
-        ),
-        _ => String::new(),
-    };
-    let switches = match (&startup.next, startup.rebuilds, &startup.may_cmdline) {
-        (Some(_), true, Ok(())) => {
-            let chosen = |name: &str| fields.get(name).to_string();
-            let attempts: String = (0..=10)
-                .map(|n| {
-                    let label = if n == 0 { "Never: always try a full boot".to_string() } else { format!("After {n} that never counted as good") };
-                    format!("<option value=\"{n}\"{s}>{l}</option>", s = if chosen("bootattempts") == n.to_string() { " selected" } else { "" }, l = escape(&label))
-                })
+    // Timeouts.
+    let may = startup.may_boot.is_ok();
+    let mut rows = String::new();
+    for (name, label, default, unit, applies) in TIMEOUTS {
+        let field = settings::text(name, label, "text", Width::Short, may, r#"inputmode="numeric" autocomplete="off""#);
+        rows.push_str(&settings::row(label, &format!("{applies} Usually {default}."), &format!(r#"{field}<span class="value">{}</span>"#, escape(unit))));
+    }
+    let changed = timeouts_changed(startup, fields);
+    let mut foot = String::new();
+    if may && changed {
+        foot.push_str(&settings::actions(&format!(
+            "{}{}",
+            settings::button("Undo", "undo-timeouts", &[], Weight::Plain, true),
+            settings::submit("Apply", Weight::Primary, true)
+        )));
+    }
+    if let Err(why) = &startup.may_boot {
+        foot.push_str(&settings::locked(why));
+    }
+    let timeouts_group = format!(r#"<form fx-submit="save-timeouts">{}</form>"#, settings::group("Timeouts", &rows, &foot));
+
+    // The kernel's command line.
+    let mut rows = settings::row("This boot", "", &settings::value(&startup.running, true));
+    if let Some(next) = &startup.next
+        && *next != startup.running
+    {
+        rows.push_str(&settings::row("The next boot", "", &settings::value(next, true)));
+    }
+    let mut foot = String::new();
+    match (&startup.next, startup.rebuilds, &startup.may_cmdline) {
+        (Some(next), true, Ok(())) => {
+            let attempts: Vec<(String, String)> = (0..=10)
+                .map(|n| (n.to_string(), if n == 0 { "Never: always try a full boot".to_string() } else { format!("After {n} that never counted as good") }))
                 .collect();
-            let quiet: String = [(0, "Everything"), (1, "Not over a sign-in prompt"), (2, "Only errors, and not over a sign-in prompt")]
+            let quiet: Vec<(String, String)> = [(0, "Everything"), (1, "Not over a sign-in prompt"), (2, "Only errors, and not over a sign-in prompt")]
                 .iter()
-                .map(|(n, label)| format!("<option value=\"{n}\"{s}>{label}</option>", s = if chosen("quiet") == n.to_string() { " selected" } else { "" }))
+                .map(|(n, label)| (n.to_string(), label.to_string()))
                 .collect();
-            let next = startup.next.as_deref().unwrap_or_default();
-            let changed = chosen("bootattempts") != flag(next, ATTEMPTS).unwrap_or(DEFAULT_ATTEMPTS).to_string()
-                || chosen("quiet") != flag(next, QUIET).unwrap_or(DEFAULT_QUIET).to_string();
-            format!(
-                "<form class=\"edit\" fx-submit=\"save-cmdline\">\
-                 <label>Start in recovery<select name=\"bootattempts\">{attempts}</select></label>\
-                 <p class=\"hint\">How many boots in a row may fail to count as good before the machine starts in recovery, a shell with no services.</p>\
-                 <label>What peinit writes on the console<select name=\"quiet\">{quiet}</select></label>\
-                 <p class=\"hint\">Applies at the next boot, once the boot image has been made again with the new line.</p>{save}</form>",
-                save = save(true, changed),
-            )
+            rows.push_str(&settings::row(
+                "Start in recovery",
+                "How many boots in a row may fail to count as good before the machine starts in recovery, a shell with no services.",
+                &settings::select("bootattempts", "Start in recovery", &attempts, true),
+            ));
+            rows.push_str(&settings::row("What peinit writes on the console", "", &settings::select("quiet", "What peinit writes on the console", &quiet, true)));
+            let changed = fields.get("bootattempts") != flag(next, ATTEMPTS).unwrap_or(DEFAULT_ATTEMPTS).to_string()
+                || fields.get("quiet") != flag(next, QUIET).unwrap_or(DEFAULT_QUIET).to_string();
+            if changed {
+                foot.push_str(&settings::actions(&format!(
+                    "{}{}",
+                    settings::button("Undo", "undo-cmdline", &[], Weight::Plain, true),
+                    settings::submit("Apply at the next boot", Weight::Primary, true)
+                )));
+            }
+            foot.push_str(&settings::hint("The boot image is made again when the command line changes, so these apply at the next boot."));
         }
-        (Some(_), true, Err(why)) => format!("<p class=\"why\">{}</p>", escape(why)),
-        _ => String::new(),
-    };
-    let how = if startup.rebuilds {
-        "The boot image is made again when the command line changes, so a change applies at the next boot."
-    } else {
-        "The command line is part of the boot image, which is only made when Peios is installed or upgraded, so it is shown here and not changed."
-    };
-    let cmdline_card = format!(
-        "<section class=\"card\" aria-label=\"Kernel command line\"><h2>Kernel command line</h2>\
-         <dl class=\"facts\"><dt>This boot</dt><dd><code>{running}</code></dd>{next}</dl>\
-         <p class=\"hint\">{how}</p>{switches}</section>",
-        running = escape(&startup.running),
-    );
-
-    format!("{boot_card}{timeouts_card}{login_card}{cmdline_card}")
-}
-
-fn save(may: bool, changed: bool) -> String {
-    if !may {
-        return String::new();
+        (Some(_), true, Err(why)) => foot.push_str(&settings::locked(why)),
+        (_, true, _) => foot.push_str(&settings::hint("The boot image is made again when the command line changes, so a change applies at the next boot.")),
+        _ => foot.push_str(&settings::hint(
+            "The command line is part of the boot image, which is only made when Peios is installed or upgraded, so it is shown here and not changed.",
+        )),
     }
-    format!("<div class=\"actions\"><button class=\"primary\"{}>Save</button></div>", if changed { "" } else { " disabled" })
-}
+    let cmdline_group = format!(r#"<form fx-submit="save-cmdline">{}</form>"#, settings::group("Kernel command line", &rows, &foot));
 
-fn why(may: &Result<(), String>) -> String {
-    match may {
-        Ok(()) => String::new(),
-        Err(why) => format!("<p class=\"why\">{}</p>", escape(why)),
-    }
+    format!(
+        "{}{hero}{login_group}{timeouts_group}{cmdline_group}",
+        settings::head(Glyph::Power, Tile::Orange, "Startup & shutdown", "How this boot went, and how the machine starts and stops.")
+    )
 }
 
 pub fn save_timeouts(startup: &Startup, fields: &Fields) -> Result<String, String> {
@@ -333,6 +339,11 @@ pub fn save_autologon(startup: &Startup, fields: &Fields) -> Result<String, Stri
     } else {
         format!("The console will sign {chosen} in without asking, if {chosen} signs in without a password.")
     })
+}
+
+/// Applies a field that applies as it changes.
+pub fn apply(name: &str, startup: &Startup, fields: &Fields) -> Option<Result<String, String>> {
+    (name == "autologon").then(|| save_autologon(startup, fields))
 }
 
 #[cfg(test)]
