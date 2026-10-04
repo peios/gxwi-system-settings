@@ -48,6 +48,40 @@ pub struct Startup {
     pub running: String,
     pub next: Option<String>,
     pub rebuilds: bool,
+    /// Whether this person may change the next boot's command line: asked
+    /// by opening the file for writing.
+    pub may_cmdline: Result<(), String>,
+}
+
+/// The Peios flags System Settings offers as switches: the boot-attempt
+/// threshold (3 unless the line says) and how much peinit writes to the
+/// console (1 unless it says).
+pub const ATTEMPTS: &str = "peios.bootattempts";
+pub const QUIET: &str = "peios.quiet";
+const DEFAULT_ATTEMPTS: u32 = 3;
+const DEFAULT_QUIET: u32 = 1;
+
+/// A flag's value on a command line, if it is there and a number.
+pub fn flag(line: &str, name: &str) -> Option<u32> {
+    line.split_whitespace().find_map(|token| token.strip_prefix(name)?.strip_prefix('=')?.parse().ok())
+}
+
+/// The line with the two flags as given: each taken out wherever it was,
+/// and put back at the end only where it isn't the default, so a line
+/// left as it was is not rewritten for nothing.
+pub fn with_flags(line: &str, attempts: u32, quiet: u32) -> String {
+    let mut tokens: Vec<String> = line
+        .split_whitespace()
+        .filter(|token| ![ATTEMPTS, QUIET].iter().any(|name| token.strip_prefix(name).is_some_and(|rest| rest.starts_with('='))))
+        .map(str::to_string)
+        .collect();
+    if attempts != DEFAULT_ATTEMPTS {
+        tokens.push(format!("{ATTEMPTS}={attempts}"));
+    }
+    if quiet != DEFAULT_QUIET {
+        tokens.push(format!("{QUIET}={quiet}"));
+    }
+    tokens.join(" ")
 }
 
 pub fn read(ident: &Ident) -> Startup {
@@ -67,6 +101,13 @@ pub fn read(ident: &Ident) -> Startup {
         running: std::fs::read_to_string("/proc/cmdline").unwrap_or_default().trim().to_string(),
         next: std::fs::read_to_string(NEXT_CMDLINE).ok().map(|t| t.trim().to_string()),
         rebuilds: reg::exists(REBUILDER_KEY) && reg::number(REBUILDER_KEY, "Disabled").is_none_or(|d| d == 0),
+        may_cmdline: std::fs::OpenOptions::new().write(true).open(NEXT_CMDLINE).map(|_| ()).map_err(|e| match e.kind() {
+            std::io::ErrorKind::PermissionDenied => format!(
+                "You may look, but changing the next boot's command line needs write access to {NEXT_CMDLINE}, which as shipped only Administrators have."
+            ),
+            std::io::ErrorKind::NotFound => "This machine has no command line to change: it boots from its install image.".to_string(),
+            _ => format!("The next boot's command line can't be changed: {e}."),
+        }),
     }
 }
 
@@ -101,6 +142,19 @@ pub fn fill(startup: &Startup, fields: &mut Fields) {
         fields.set(name, &value.unwrap_or(*default).to_string());
     }
     fields.set("autologon", startup.autologon.as_ref().ok().cloned().flatten().as_deref().unwrap_or(""));
+    let next = startup.next.as_deref().unwrap_or_default();
+    fields.set("bootattempts", &flag(next, ATTEMPTS).unwrap_or(DEFAULT_ATTEMPTS).to_string());
+    fields.set("quiet", &flag(next, QUIET).unwrap_or(DEFAULT_QUIET).to_string());
+}
+
+/// Writes the two flags into the next boot's command line, for the boot
+/// image to be made again from it.
+pub fn save_cmdline(startup: &Startup, fields: &Fields) -> Result<String, String> {
+    let next = startup.next.as_deref().ok_or("This machine has no command line to change.")?;
+    let number = |name: &str, most: u32| fields.get(name).parse::<u32>().ok().filter(|n| *n <= most).ok_or_else(|| "Choose from the list.".to_string());
+    let line = with_flags(next, number("bootattempts", 10)?, number("quiet", 2)?);
+    std::fs::write(NEXT_CMDLINE, format!("{line}\n")).map_err(|e| format!("The command line couldn't be written: {e}."))?;
+    Ok("Saved. It applies at the next boot.".into())
 }
 
 pub fn render(startup: &Startup, fields: &Fields) -> String {
@@ -171,15 +225,43 @@ pub fn render(startup: &Startup, fields: &Fields) -> String {
         ),
         _ => String::new(),
     };
+    let switches = match (&startup.next, startup.rebuilds, &startup.may_cmdline) {
+        (Some(_), true, Ok(())) => {
+            let chosen = |name: &str| fields.get(name).to_string();
+            let attempts: String = (0..=10)
+                .map(|n| {
+                    let label = if n == 0 { "Never: always try a full boot".to_string() } else { format!("After {n} that never counted as good") };
+                    format!("<option value=\"{n}\"{s}>{l}</option>", s = if chosen("bootattempts") == n.to_string() { " selected" } else { "" }, l = escape(&label))
+                })
+                .collect();
+            let quiet: String = [(0, "Everything"), (1, "Not over a sign-in prompt"), (2, "Only errors, and not over a sign-in prompt")]
+                .iter()
+                .map(|(n, label)| format!("<option value=\"{n}\"{s}>{label}</option>", s = if chosen("quiet") == n.to_string() { " selected" } else { "" }))
+                .collect();
+            let next = startup.next.as_deref().unwrap_or_default();
+            let changed = chosen("bootattempts") != flag(next, ATTEMPTS).unwrap_or(DEFAULT_ATTEMPTS).to_string()
+                || chosen("quiet") != flag(next, QUIET).unwrap_or(DEFAULT_QUIET).to_string();
+            format!(
+                "<form class=\"edit\" fx-submit=\"save-cmdline\">\
+                 <label>Start in recovery<select name=\"bootattempts\">{attempts}</select></label>\
+                 <p class=\"hint\">How many boots in a row may fail to count as good before the machine starts in recovery, a shell with no services.</p>\
+                 <label>What peinit writes on the console<select name=\"quiet\">{quiet}</select></label>\
+                 <p class=\"hint\">Applies at the next boot, once the boot image has been made again with the new line.</p>{save}</form>",
+                save = save(true, changed),
+            )
+        }
+        (Some(_), true, Err(why)) => format!("<p class=\"why\">{}</p>", escape(why)),
+        _ => String::new(),
+    };
     let how = if startup.rebuilds {
-        "The boot image is rebuilt when the command line changes, so a change applies at the next boot."
+        "The boot image is made again when the command line changes, so a change applies at the next boot."
     } else {
         "The command line is part of the boot image, which is only made when Peios is installed or upgraded, so it is shown here and not changed."
     };
     let cmdline_card = format!(
         "<section class=\"card\" aria-label=\"Kernel command line\"><h2>Kernel command line</h2>\
          <dl class=\"facts\"><dt>This boot</dt><dd><code>{running}</code></dd>{next}</dl>\
-         <p class=\"hint\">{how}</p></section>",
+         <p class=\"hint\">{how}</p>{switches}</section>",
         running = escape(&startup.running),
     );
 
@@ -248,5 +330,18 @@ mod tests {
         assert_eq!(autologon_of(&args(&["--console", "--try-no-password", "peios"])), Some("peios".into()));
         assert_eq!(autologon_of(&args(&["--console"])), None);
         assert_eq!(autologon_of(&args(&["--console", "--try-no-password"])), None);
+    }
+
+    #[test]
+    fn the_flags_are_read_and_written_and_nothing_else_moves() {
+        let line = "loglevel=4 init=/bin/peinit2 peios.quiet=2 root=UUID=abc";
+        assert_eq!(flag(line, QUIET), Some(2));
+        assert_eq!(flag(line, ATTEMPTS), None);
+        // Defaults leave no token; others go at the end.
+        assert_eq!(with_flags(line, 3, 1), "loglevel=4 init=/bin/peinit2 root=UUID=abc");
+        assert_eq!(with_flags(line, 0, 2), "loglevel=4 init=/bin/peinit2 root=UUID=abc peios.bootattempts=0 peios.quiet=2");
+        // A token that merely starts with the name is not the flag.
+        assert_eq!(with_flags("peios.quietly=1", 3, 1), "peios.quietly=1");
+        assert_eq!(flag("peios.quietly=1", QUIET), None);
     }
 }

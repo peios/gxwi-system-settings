@@ -93,6 +93,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .edit .amount { display: flex; align-items: center; gap: var(--space-2); font-weight: 500; color: var(--text-muted); }
 .edit .amount input { width: 7em; }
 .edit .hint { margin: calc(-1 * var(--space-2)) 0 0; font-size: 12px; font-weight: 500; color: var(--text-muted); }
+.card > .hint { margin: var(--space-2) 0 var(--space-3); font-size: 12px; color: var(--text-muted); }
 .edit .note { margin: 0; }
 .actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-2) 0 0; }
 .edit .actions { margin: 0; }

@@ -146,7 +146,7 @@ impl Settings {
 fn field_names() -> Vec<&'static str> {
     let mut names = vec![
         "zone", "servers", "unauthenticated", "dhcp", "min-poll", "max-poll", "lang", "formats", "keymap", "hostname",
-        "autologon",
+        "autologon", "bootattempts", "quiet",
     ];
     names.extend(startup::TIMEOUTS.iter().map(|(name, ..)| *name));
     names
@@ -200,6 +200,7 @@ impl Live for Settings {
             "save-name" => about::save_name(fields),
             "save-timeouts" => startup::save_timeouts(&self.startup, fields),
             "save-autologon" => startup::save_autologon(&self.startup, fields),
+            "save-cmdline" => startup::save_cmdline(&self.startup, fields),
             _ => return,
         };
         let succeeded = done.is_ok();
