@@ -1,0 +1,6 @@
+# What System Settings is to a desktop (PGSS Applications): installed as
+# /usr/share/apps/dev.peios.gxwi-system-settings.toml, named for the id, by
+# the package that installs the program. It is a window and nothing else.
+title = "System Settings"
+description = "This machine's time, language, name and startup"
+program = "/usr/bin/gxwi-system-settings"

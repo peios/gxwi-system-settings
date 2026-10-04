@@ -1,0 +1,3 @@
+# libnetd and libtimed are built for Peios's Rust, 1.98.1.
+[toolchain]
+channel = "1.98.1"

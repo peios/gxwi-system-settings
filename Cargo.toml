@@ -1,0 +1,33 @@
+[package]
+name = "gxwi-system-settings"
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[dependencies]
+# Beside this checkout until a libgxwi with the dialog role is released.
+libgxwi = { path = "../gxwi/libgxwi" }
+# The registry. Every crate in one program must pin the same revision:
+# `peios-sys` links libpeios, and a program can hold only one.
+peios = { git = "https://github.com/peios/peios-rs.git", rev = "2a2a6bb022192f6e98d4e4a6a7efdbdd40d53b35", package = "peios" }
+# timed's socket, and what it accepts in Machine\System\Time. Beside this
+# checkout until it is pushed.
+libtimed = { path = "../timed/libtimed" }
+# The rule for the machine's name. Beside this checkout until it is pushed.
+libnetd = { path = "../netd/libnetd" }
+# Which languages are installed, and what a session will honour. Beside
+# this checkout until it is pushed.
+libsession = { path = "../authd/libsession" }
+# Who the local accounts are, for signing in at the console.
+libauthd-client = { path = "../authd/libauthd-client" }
+libauthd = { path = "../authd/libauthd" }
+# Restarting the console-keymap service, and how this boot went. Beside this
+# checkout until it is pushed.
+peinit2 = { path = "../peinit", default-features = false }
+libc = "0.2"
+# The time, in the zone chosen.
+jiff = "0.2.29"
+[dev-dependencies]
+# The events a window is sent carry a JSON value, which libgxwi re-exports.
+serde_json = "1"

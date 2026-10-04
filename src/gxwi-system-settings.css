@@ -1,0 +1,134 @@
+/* Made from the theme's tokens, which the desktop's page for a live surface
+   brings with it. */
+html, body { height: 100%; }
+
+body {
+    margin: 0;
+    background: var(--surface-1);
+    color: var(--text-primary);
+    font: 500 13px/1.4 var(--font-text);
+    color-scheme: light dark;
+    overflow: hidden;
+}
+
+#fx-root { display: flex; flex-direction: column; height: 100%; box-sizing: border-box; }
+#fx-root[data-connected="false"] { opacity: 0.5; }
+
+button { font: inherit; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent-solid); outline-offset: 1px; }
+
+/* The bar: which part of the settings is shown. */
+.bar {
+    display: flex;
+    flex: none;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+    padding: var(--space-2);
+    border-bottom: 1px solid var(--border-default);
+    background: var(--surface-2);
+}
+.tabs { display: flex; flex-wrap: wrap; }
+.tabs .tab {
+    height: var(--control-sm);
+    padding: 0 var(--space-3);
+    color: var(--text-primary);
+    background: var(--surface-1);
+    border: 1px solid var(--border-default);
+    border-radius: 0;
+    cursor: pointer;
+}
+.tabs .tab:hover { border-color: var(--border-strong); }
+.tabs .tab + .tab { margin-left: -1px; }
+.tabs .tab:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.tabs .tab:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.tabs .tab[aria-pressed="true"] { color: var(--accent-on); background: var(--accent-solid); border-color: var(--accent-solid); }
+
+.said { flex: none; margin: 0; padding: var(--space-2) var(--space-3); font-size: 12px; color: var(--text-secondary); border-bottom: 1px solid var(--border-default); }
+.said.bad { color: var(--danger-text); }
+
+/* The cards, in one column that scrolls. */
+.body { flex: 1; min-height: 0; overflow-y: auto; }
+.cards { display: flex; flex-direction: column; gap: var(--space-3); max-width: 720px; margin: 0 auto; padding: var(--space-3); box-sizing: border-box; }
+.card {
+    padding: var(--space-3) var(--space-4) var(--space-4);
+    background: var(--surface-2);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    min-width: 0;
+}
+.card h2 { margin: 0 0 var(--space-3); font-size: 14px; font-weight: 700; }
+.card .note { margin: var(--space-2) 0 0; font-size: 12px; color: var(--text-secondary); }
+.card .note.bad { color: var(--danger-text); }
+.card .why { margin: var(--space-3) 0 0; font-size: 12px; color: var(--text-muted); }
+.cards > .why { margin: 0; padding: var(--space-2) var(--space-3); font-size: 12px; color: var(--text-secondary); background: var(--surface-2); border-radius: var(--radius-sm); }
+.card code { font: 500 12px/1.4 var(--font-mono); overflow-wrap: anywhere; }
+
+/* Now: the time here, large. */
+.now .clock { margin: 0; font-size: 36px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
+.now .date { margin: 0; font-size: 15px; }
+.now .zone { margin: var(--space-1) 0 0; font-size: 12px; color: var(--text-muted); }
+
+/* Forms. */
+.edit { display: flex; flex-direction: column; gap: var(--space-3); margin: 0; }
+.edit label { display: flex; flex-direction: column; gap: var(--space-1); font-size: 12px; font-weight: 600; color: var(--text-secondary); min-width: 0; }
+.edit label.check { flex-direction: row; align-items: center; gap: var(--space-2); font-weight: 500; color: var(--text-primary); }
+.edit input:not([type="checkbox"]), .edit select, .edit textarea {
+    min-height: var(--control-sm);
+    padding: 0 var(--space-2);
+    font: 500 13px/1.4 var(--font-text);
+    color: var(--text-primary);
+    background: var(--bg-sunken);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    box-sizing: border-box;
+    max-width: 100%;
+}
+.edit textarea { padding: var(--space-1) var(--space-2); font-family: var(--font-mono); font-size: 12px; resize: vertical; }
+.edit input[type="checkbox"] { margin: 0; accent-color: var(--accent-solid); }
+.edit :disabled { opacity: 0.7; }
+.edit .row { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.edit .row label { flex: 1; min-width: 10em; }
+.edit .amount { display: flex; align-items: center; gap: var(--space-2); font-weight: 500; color: var(--text-muted); }
+.edit .amount input { width: 7em; }
+.edit .hint { margin: calc(-1 * var(--space-2)) 0 0; font-size: 12px; font-weight: 500; color: var(--text-muted); }
+.edit .note { margin: 0; }
+.actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-2) 0 0; }
+.edit .actions { margin: 0; }
+.actions button {
+    height: var(--control-sm);
+    padding: 0 var(--space-3);
+    color: var(--text-primary);
+    background: var(--surface-1);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+.actions button:hover { border-color: var(--border-strong); }
+.actions button.primary { color: var(--accent-on); background: var(--accent-solid); border-color: var(--accent-solid); }
+.actions button:disabled { opacity: 0.5; cursor: default; }
+
+/* Facts: a term and what it is, side by side. */
+.facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-1) var(--space-4); margin: 0; }
+.facts dt { color: var(--text-muted); }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+
+/* What timed hears from each server. */
+.sources { width: 100%; margin-top: var(--space-4); border-collapse: collapse; font-size: 12px; }
+.sources caption { text-align: left; font-weight: 600; color: var(--text-secondary); padding-bottom: var(--space-1); }
+.sources th, .sources td { padding: var(--space-1) var(--space-2) var(--space-1) 0; text-align: left; vertical-align: top; border-top: 1px solid var(--border-default); }
+.sources thead th { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); border-top: 0; }
+.sources tbody th { font-weight: 500; overflow-wrap: anywhere; }
+.sources th small { display: block; color: var(--text-muted); font-weight: 500; }
+.sources .num { text-align: right; font-variant-numeric: tabular-nums; }
+.sources tr.peer th { font-weight: 700; }
+
+@media (max-width: 560px) {
+    .cards { padding: var(--space-2); }
+    .card { padding: var(--space-3); }
+    .now .clock { font-size: 28px; }
+    .facts { grid-template-columns: minmax(0, 1fr); }
+    .facts dd { margin-bottom: var(--space-2); }
+    .sources thead th:nth-child(3), .sources td:nth-child(3) { display: none; }
+}
