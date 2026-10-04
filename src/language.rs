@@ -34,7 +34,7 @@ pub struct Language {
     pub may_keymap: Result<(), String>,
     /// Whether the layout can be loaded now: the service is there, and
     /// this person may restart it.
-    pub loader: Result<(), String>,
+    pub loader: Result<(), NotNow>,
 }
 
 /// What is installed: read once, since installing more needs a package.
@@ -97,19 +97,38 @@ pub fn read() -> Language {
     }
 }
 
+/// Why a chosen layout can't be loaded now.
+#[derive(Debug, Clone, PartialEq)]
+pub enum NotNow {
+    /// The service is there, and loads it at the next boot.
+    NextBoot(String),
+    /// Nothing loads a layout on this machine.
+    Never(String),
+}
+
 /// Whether the keymap service is there and this person may restart it,
-/// asked of peinit, which says what rights the caller holds on it.
-fn loader() -> Result<(), String> {
-    let mut client = ControlClient::connect_default().map_err(|e| format!("peinit can't be reached: {e}."))?;
-    let status = client.status_of(KEYMAP_SERVICE).map_err(|_| {
-        "This machine has no console-keymap service to load a layout, so one chosen here applies once the service is installed.".to_string()
-    })?;
+/// asked of peinit, which says what rights the caller holds on it. A
+/// service the person may not even query is left out of what peinit lists,
+/// which is told apart from one that isn't defined by the registry.
+fn loader() -> Result<(), NotNow> {
+    let defined = reg::exists(&format!("Machine\\System\\Services\\{KEYMAP_SERVICE}"));
+    if !defined {
+        return Err(NotNow::Never(
+            "This machine has no console-keymap service, so nothing loads a layout chosen here.".into(),
+        ));
+    }
+    let next_boot = || {
+        NotNow::NextBoot(
+            "You may choose the layout, but loading it now needs the right to restart the console-keymap service, so it applies at the next boot.".into(),
+        )
+    };
+    let mut client = ControlClient::connect_default().map_err(|_| next_boot())?;
+    let status = client.status_of(KEYMAP_SERVICE).map_err(|_| next_boot())?;
     let needs = ServiceAccess::for_command(Command::Restart);
-    let held = needs.wire_names().iter().all(|right| status.granted.iter().any(|g| g == right));
-    if held {
+    if needs.wire_names().iter().all(|right| status.granted.iter().any(|g| g == right)) {
         Ok(())
     } else {
-        Err("You may choose the layout, but loading it needs the right to restart the console-keymap service, so it applies at the next boot.".into())
+        Err(next_boot())
     }
 }
 
@@ -191,7 +210,7 @@ pub fn render(language: &Language, installed: &Installed, fields: &Fields) -> St
     let keymap_changed = chosen != language.keymap.as_deref().unwrap_or("");
     let loader = match &language.loader {
         Ok(()) => String::new(),
-        Err(why) => format!("<p class=\"note\">{}</p>", escape(why)),
+        Err(NotNow::NextBoot(why) | NotNow::Never(why)) => format!("<p class=\"note\">{}</p>", escape(why)),
     };
     let keyboard_card = format!(
         "<section class=\"card\" aria-label=\"Console keyboard\"><h2>Console keyboard</h2>\
@@ -264,8 +283,12 @@ pub fn save_keymap(language: &Language, installed: &Installed, fields: &Fields) 
     let value = (!chosen.is_empty()).then(|| Data::Sz(chosen.to_string()));
     reg::set(CONSOLE_KEY, "the console's keyboard layout", &[(KEYMAP_VALUE, value)])?;
     let name = if chosen.is_empty() { "US" } else { chosen };
-    if language.loader.is_err() {
-        return Ok(format!("Saved: the console's layout is {name} from the next boot."));
+    match &language.loader {
+        Ok(()) => {}
+        Err(NotNow::NextBoot(_)) => return Ok(format!("Saved: the console's layout is {name} from the next boot.")),
+        Err(NotNow::Never(_)) => {
+            return Ok(format!("Saved, as {name}. Nothing on this machine loads it: it has no console-keymap service."));
+        }
     }
     let mut client = ControlClient::connect_default().map_err(|e| format!("Saved, but peinit can't be reached to load it: {e}."))?;
     client

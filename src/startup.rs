@@ -113,7 +113,14 @@ pub fn read(ident: &Ident) -> Startup {
 
 fn boot() -> Result<Boot, String> {
     let mut client = ControlClient::connect_default().map_err(|e| format!("peinit can't be reached: {e}."))?;
-    client.boot().map_err(|e| format!("peinit didn't say how this boot went: {e}."))
+    client.boot().map_err(|e| {
+        let said = e.to_string();
+        if said.contains("ACCESS_DENIED") {
+            "How this boot went is peinit's to say, and its control descriptor (Machine\\System\\Init ControlSecurity) doesn't let you ask.".to_string()
+        } else {
+            format!("peinit didn't say how this boot went: {said}.")
+        }
+    })
 }
 
 /// The account `--try-no-password NAME` names in login's arguments.
@@ -153,7 +160,15 @@ pub fn save_cmdline(startup: &Startup, fields: &Fields) -> Result<String, String
     let next = startup.next.as_deref().ok_or("This machine has no command line to change.")?;
     let number = |name: &str, most: u32| fields.get(name).parse::<u32>().ok().filter(|n| *n <= most).ok_or_else(|| "Choose from the list.".to_string());
     let line = with_flags(next, number("bootattempts", 10)?, number("quiet", 2)?);
-    std::fs::write(NEXT_CMDLINE, format!("{line}\n")).map_err(|e| format!("The command line couldn't be written: {e}."))?;
+    // Beside it, then over it: mkuki-watch makes the boot image again as
+    // soon as the file changes, and must never find it half-written.
+    let staging = format!("{NEXT_CMDLINE}.new");
+    std::fs::write(&staging, format!("{line}\n"))
+        .and_then(|()| std::fs::rename(&staging, NEXT_CMDLINE))
+        .map_err(|e| {
+            let _ = std::fs::remove_file(&staging);
+            format!("The command line couldn't be written: {e}.")
+        })?;
     Ok("Saved. It applies at the next boot.".into())
 }
 

@@ -106,14 +106,28 @@ pub fn fill(policy: &Policy, fields: &mut Fields) {
     fields.set("max-poll", &policy.max_poll.unwrap_or(DEFAULT_MAX_POLL).to_string());
 }
 
-/// The zone the clock is shown in: the one timed says is in force, or UTC.
+/// The zone the clock is shown in: the one timed says is in force, or, where
+/// timed can't be asked, whatever `/etc/localtime` holds now.
 pub fn shown_zone(time: &Time) -> jiff::tz::TimeZone {
-    time.status
-        .as_ref()
-        .ok()
-        .and_then(|status| status.zone.as_deref())
-        .and_then(|name| jiff::tz::TimeZone::get(name).ok())
-        .unwrap_or(jiff::tz::TimeZone::UTC)
+    match &time.status {
+        Ok(status) => status
+            .zone
+            .as_deref()
+            .and_then(|name| jiff::tz::TimeZone::get(name).ok())
+            .unwrap_or(jiff::tz::TimeZone::UTC),
+        Err(_) => std::fs::read("/etc/localtime")
+            .ok()
+            .and_then(|bytes| jiff::tz::TimeZone::tzif("localtime", &bytes).ok())
+            .unwrap_or(jiff::tz::TimeZone::UTC),
+    }
+}
+
+/// The name of the zone times are given in when setting the clock.
+fn zone_in_force(time: &Time) -> String {
+    match &time.status {
+        Ok(status) => status.zone.clone().unwrap_or_else(|| "UTC".into()),
+        Err(_) => "the time zone this machine is in".into(),
+    }
 }
 
 pub fn render(time: &Time, zones: &[Listed], fields: &Fields, now: jiff::Timestamp) -> String {
@@ -217,7 +231,7 @@ pub fn render(time: &Time, zones: &[Listed], fields: &Fields, now: jiff::Timesta
              <button type=\"button\" fx-click=\"automatic\"{disabled}>Set the time automatically</button></div></form>",
             date = escape(&date),
             clock = escape(&clock),
-            zone = escape(time.policy.zone.as_deref().unwrap_or("UTC")),
+            zone = escape(&zone_in_force(time)),
         )
     };
     let setting_card = format!("<section class=\"card\" aria-label=\"Setting the clock\"><h2>Setting the clock</h2>{setting}</section>");
