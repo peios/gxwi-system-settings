@@ -178,7 +178,7 @@ impl Settings {
 fn field_names() -> Vec<&'static str> {
     let mut names = vec![
         "automatic", "zone", "servers", "unauthenticated", "dhcp", "min-poll", "max-poll", "lang", "formats", "keymap", "hostname",
-        "autologon", "bootattempts", "quiet",
+        "autologon", "bootattempts", "quiet", "safemode",
     ];
     names.extend(startup::TIMEOUTS.iter().map(|(name, ..)| *name));
     names
@@ -238,6 +238,7 @@ impl Live for Settings {
             "undo-cmdline" => {
                 self.restore("bootattempts", fields);
                 self.restore("quiet", fields);
+                self.restore("safemode", fields);
                 return;
             }
             "set-time" => time::set_clock(&self.time, fields),

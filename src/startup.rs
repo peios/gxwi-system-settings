@@ -54,11 +54,13 @@ pub struct Startup {
     pub may_cmdline: Result<(), String>,
 }
 
-/// The Peios flags System Settings offers as switches: the boot-attempt
-/// threshold (3 unless the line says) and how much peinit writes to the
-/// console (1 unless it says).
+/// The Peios flags System Settings offers: the boot-attempt threshold (3
+/// unless the line says), how much peinit writes to the console (1 unless it
+/// says), and safe mode (off unless it says 1). Safe mode on the line holds
+/// for every boot until it is taken out again, so the window says so.
 pub const ATTEMPTS: &str = "peios.bootattempts";
 pub const QUIET: &str = "peios.quiet";
+pub const SAFEMODE: &str = "peios.safemode";
 const DEFAULT_ATTEMPTS: u32 = 3;
 const DEFAULT_QUIET: u32 = 1;
 
@@ -67,13 +69,18 @@ pub fn flag(line: &str, name: &str) -> Option<u32> {
     line.split_whitespace().find_map(|token| token.strip_prefix(name)?.strip_prefix('=')?.parse().ok())
 }
 
-/// The line with the two flags as given: each taken out wherever it was,
+/// Whether the line starts every boot in safe mode.
+pub fn safe_mode(line: &str) -> bool {
+    flag(line, SAFEMODE) == Some(1)
+}
+
+/// The line with the three flags as given: each taken out wherever it was,
 /// and put back at the end only where it isn't the default, so a line
 /// left as it was is not rewritten for nothing.
-pub fn with_flags(line: &str, attempts: u32, quiet: u32) -> String {
+pub fn with_flags(line: &str, attempts: u32, quiet: u32, safe: bool) -> String {
     let mut tokens: Vec<String> = line
         .split_whitespace()
-        .filter(|token| ![ATTEMPTS, QUIET].iter().any(|name| token.strip_prefix(name).is_some_and(|rest| rest.starts_with('='))))
+        .filter(|token| ![ATTEMPTS, QUIET, SAFEMODE].iter().any(|name| token.strip_prefix(name).is_some_and(|rest| rest.starts_with('='))))
         .map(str::to_string)
         .collect();
     if attempts != DEFAULT_ATTEMPTS {
@@ -81,6 +88,9 @@ pub fn with_flags(line: &str, attempts: u32, quiet: u32) -> String {
     }
     if quiet != DEFAULT_QUIET {
         tokens.push(format!("{QUIET}={quiet}"));
+    }
+    if safe {
+        tokens.push(format!("{SAFEMODE}=1"));
     }
     tokens.join(" ")
 }
@@ -153,14 +163,15 @@ pub fn fill(startup: &Startup, fields: &mut Fields) {
     let next = startup.next.as_deref().unwrap_or_default();
     fields.set("bootattempts", &flag(next, ATTEMPTS).unwrap_or(DEFAULT_ATTEMPTS).to_string());
     fields.set("quiet", &flag(next, QUIET).unwrap_or(DEFAULT_QUIET).to_string());
+    fields.set("safemode", if safe_mode(next) { "on" } else { "" });
 }
 
-/// Writes the two flags into the next boot's command line, for the boot
+/// Writes the three flags into the next boot's command line, for the boot
 /// image to be made again from it.
 pub fn save_cmdline(startup: &Startup, fields: &Fields) -> Result<String, String> {
     let next = startup.next.as_deref().ok_or("This machine has no command line to change.")?;
     let number = |name: &str, most: u32| fields.get(name).parse::<u32>().ok().filter(|n| *n <= most).ok_or_else(|| "Choose from the list.".to_string());
-    let line = with_flags(next, number("bootattempts", 10)?, number("quiet", 2)?);
+    let line = with_flags(next, number("bootattempts", 10)?, number("quiet", 2)?, fields.get("safemode") == "on");
     // Beside it, then over it: mkuki-watch makes the boot image again as
     // soon as the file changes, and must never find it half-written.
     let staging = format!("{NEXT_CMDLINE}.new");
@@ -198,11 +209,16 @@ pub fn render(startup: &Startup, fields: &Fields) -> String {
                 _ => "Normal Boot",
             };
             // Why it is in that mode, when it isn't the usual.
-            let about = if boot.reason == "normal" {
+            let mut about = if boot.reason == "normal" {
                 crate::words::boot_health(boot)
             } else {
                 format!("{}. {}", crate::words::boot_mode(boot), crate::words::boot_health(boot))
             };
+            // Asked for on the line, it comes back every boot until it's
+            // taken out, which a person in safe mode wants to know.
+            if boot.reason == "requested" && startup.next.as_deref().is_some_and(safe_mode) {
+                about.push_str(" The machine will keep starting in safe mode until Always Start in Safe Mode is turned off below.");
+            }
             settings::hero(&settings::hero_title(Glyph::Power, Tile::Orange, title, &about), &settings::pill(&said, tone))
         }
     };
@@ -282,8 +298,14 @@ pub fn render(startup: &Startup, fields: &Fields) -> String {
                 "What peinit writes to the console while the machine starts.",
                 &settings::select("quiet", "Console Messages", &quiet, true),
             ));
+            rows.push_str(&settings::row(
+                "Always Start in Safe Mode",
+                "Every boot starts only essential services and those marked for safe mode, until this is turned off. For a machine whose services keep it from starting properly.",
+                &settings::switch("safemode", "Always Start in Safe Mode", true),
+            ));
             let changed = fields.get("bootattempts") != flag(next, ATTEMPTS).unwrap_or(DEFAULT_ATTEMPTS).to_string()
-                || fields.get("quiet") != flag(next, QUIET).unwrap_or(DEFAULT_QUIET).to_string();
+                || fields.get("quiet") != flag(next, QUIET).unwrap_or(DEFAULT_QUIET).to_string()
+                || (fields.get("safemode") == "on") != safe_mode(next);
             if changed {
                 foot.push_str(&settings::actions(&format!(
                     "{}{}",
@@ -368,10 +390,22 @@ mod tests {
         assert_eq!(flag(line, QUIET), Some(2));
         assert_eq!(flag(line, ATTEMPTS), None);
         // Defaults leave no token; others go at the end.
-        assert_eq!(with_flags(line, 3, 1), "loglevel=4 init=/bin/peinit2 root=UUID=abc");
-        assert_eq!(with_flags(line, 0, 2), "loglevel=4 init=/bin/peinit2 root=UUID=abc peios.bootattempts=0 peios.quiet=2");
+        assert_eq!(with_flags(line, 3, 1, false), "loglevel=4 init=/bin/peinit2 root=UUID=abc");
+        assert_eq!(with_flags(line, 0, 2, false), "loglevel=4 init=/bin/peinit2 root=UUID=abc peios.bootattempts=0 peios.quiet=2");
         // A token that merely starts with the name is not the flag.
-        assert_eq!(with_flags("peios.quietly=1", 3, 1), "peios.quietly=1");
+        assert_eq!(with_flags("peios.quietly=1", 3, 1, false), "peios.quietly=1");
         assert_eq!(flag("peios.quietly=1", QUIET), None);
+    }
+
+    #[test]
+    fn safe_mode_is_on_the_line_only_while_it_is_chosen() {
+        let line = "root=UUID=abc peios.safemode=1 quiet";
+        assert!(safe_mode(line));
+        assert!(!safe_mode("root=UUID=abc peios.safemode=0"));
+        assert!(!safe_mode("root=UUID=abc"));
+        // Turned off, the token goes; turned on, it goes at the end once.
+        assert_eq!(with_flags(line, 3, 1, false), "root=UUID=abc quiet");
+        assert_eq!(with_flags(line, 3, 1, true), "root=UUID=abc quiet peios.safemode=1");
+        assert_eq!(with_flags("root=UUID=abc peios.safemode=0", 3, 1, true), "root=UUID=abc peios.safemode=1");
     }
 }
