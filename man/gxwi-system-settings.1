@@ -1,0 +1,62 @@
+.TH GXWI-SYSTEM-SETTINGS 1 "2026-10-06" "Peios"
+.SH NAME
+gxwi-system-settings \- this machine's time, language, name and startup, on a GXWI desktop
+.SH SYNOPSIS
+.B gxwi-system-settings
+.SH DESCRIPTION
+System Settings shows the machine's own settings in four sections down the
+side. A switch or a choice from a list applies the moment it is made; one
+that cannot be is put back, and the line along the bottom says why. What is
+typed applies when its button is pressed: Apply, Save or Set Clock. What is
+shown is read again every five seconds, so a change made elsewhere appears.
+.PP
+Time & Date shows the time here and how well it is kept, asked of timed. It
+sets the time zone, whether the time is set automatically, the time servers
+and how often they are asked, all in \%Machine\eSystem\eTime, which timed
+watches. With automatic time off, Set Clock asks timed to set the clock,
+which needs timed's control right.
+.PP
+Language & Keyboard sets the language and formats every session starts in,
+in \%Machine\eSystem\eLocale, from the locales installed, and the console's
+keyboard layout, in \%Machine\eSystem\eConsole. A new layout is loaded at once
+by restarting the console-keymap service, where the person may restart it,
+and otherwise at the next boot.
+.PP
+Startup & Shutdown says how this boot went, asked of peinit. It sets how
+long peinit waits at each stage, in \%Machine\eSystem\eBoot; which local
+account, if any, the console signs in without a password; and, on a machine
+with the dynamic-boot feature, three flags on the kernel command line the
+next boot image is made from: when to start in recovery, what peinit writes
+to the console, and whether every boot starts in safe mode.
+.PP
+About shows the release, the kernel, the hardware and the disks, and sets
+the machine's name, in \%Machine\eSystem\eNetwork, which netd applies.
+.PP
+Whether the person may change each is asked of the system, by opening the
+key or file for writing, never worked out from who they are. As shipped,
+only Administrators may change any of it. Anyone else sees what they may,
+and the window says once why they cannot change it. A person's own settings are
+My Settings', and the desktop's are Desktop Settings'.
+.SH FILES
+.TP
+.I /usr/share/apps/dev.peios.gxwi-system-settings.toml
+Its application declaration, listed in a launcher as System Settings.
+.TP
+.I /lcl/etc/boot/cmdline
+The kernel command line the next boot image is made from.
+.TP
+.I /usr/share/zoneinfo/zone1970.tab
+The time zones offered.
+.TP
+.I /usr/share/kbd/keymaps/i386
+The console keyboard layouts offered.
+.TP
+.I /usr/lib/x86_64-linux-peios/locale
+The languages and formats offered.
+.TP
+.I /usr/lib/os-release
+The release shown under About.
+.SH SEE ALSO
+The time zone, and setting the clock by hand; Configuring time sources;
+Session locales; Console keyboards and fonts; Boot and boot modes; and The
+login command, at learn.peios.org.
