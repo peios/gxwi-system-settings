@@ -398,6 +398,37 @@ mod tests {
     }
 
     #[test]
+    fn a_boot_safe_because_the_line_asked_says_it_will_stay_so() {
+        let startup = |next: &str| Startup {
+            boot: Ok(Boot {
+                mode: "safe".into(),
+                reason: "requested".into(),
+                downgrade: Vec::new(),
+                attempts: 0,
+                max_attempts: 3,
+                confirmed: true,
+                grace_seconds: 30,
+                waiting_on: Vec::new(),
+                confirms_at: None,
+                confirm_error: None,
+            }),
+            timeouts: vec![None; TIMEOUTS.len()],
+            may_boot: Ok(()),
+            autologon: Ok(None),
+            may_login: Ok(()),
+            accounts: Vec::new(),
+            running: "root=UUID=abc peios.safemode=1".into(),
+            next: Some(next.into()),
+            rebuilds: true,
+            may_cmdline: Ok(()),
+        };
+        let said = "keep starting in safe mode until Always Start in Safe Mode is turned off";
+        assert!(render(&startup("root=UUID=abc peios.safemode=1"), &Fields::default()).contains(said));
+        // Turned off already: the next boot is a normal one, so nothing to warn of.
+        assert!(!render(&startup("root=UUID=abc"), &Fields::default()).contains(said));
+    }
+
+    #[test]
     fn safe_mode_is_on_the_line_only_while_it_is_chosen() {
         let line = "root=UUID=abc peios.safemode=1 quiet";
         assert!(safe_mode(line));
